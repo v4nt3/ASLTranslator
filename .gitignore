@@ -1,0 +1,83 @@
+# ───────────────────────────────
+# ARCHIVOS DE PYTHON
+# ───────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dll
+
+# Compilados
+*.egg-info/
+dist/
+build/
+
+# Archivos de logs
+*.log
+
+# ───────────────────────────────
+# ENTORNOS VIRTUALES
+# ───────────────────────────────
+env/
+
+# ───────────────────────────────
+# NOTEBOOKS / CACHE
+# ───────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ───────────────────────────────
+# ARCHIVOS DE MODELOS PESADOS
+# (agrega extensiones según necesites)
+# ───────────────────────────────
+*.h5
+*.hdf5
+*.pth
+*.pt
+*.onnx
+*.joblib
+*.pkl
+*.pickle
+*.weights
+models/
+checkpoints/
+
+# ───────────────────────────────
+# DATOS GRANDES
+# ───────────────────────────────
+data/features_fused
+dataset/
+*.csv
+*.tsv
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.npy
+
+
+# ───────────────────────────────
+# CONFIGURACIONES LOCALES
+# ───────────────────────────────
+*.env
+.env.*
+config.json
+
+# ───────────────────────────────
+# EDITORES
+# ───────────────────────────────
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# MacOS
+.DS_Store
+
