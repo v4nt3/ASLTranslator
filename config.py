@@ -169,7 +169,7 @@ class TrainingConfig:
     """Configuración del entrenamiento"""
     # Básico
     num_epochs: int = 100
-    batch_size: int = 64
+    batch_size: int = 128
     num_workers: int = 10
     pin_memory: bool = False
     
