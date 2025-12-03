@@ -168,7 +168,7 @@ class ModelConfig:
 class TrainingConfig:
     """Configuración del entrenamiento"""
     # Básico
-    num_epochs: int = 100
+    num_epochs: int = 250
     batch_size: int = 128
     num_workers: int = 10
     pin_memory: bool = False
