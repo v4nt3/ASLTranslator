@@ -3,10 +3,10 @@ Modelo temporal optimizado que trabaja con features precomputadas
 Solo entrena LSTM + Classifier (sin backbones visuales)
 """
 
-import torch # type: ignore
-import torch.nn as nn # type: ignore
+import torch
+import torch.nn as nn
 import logging
-import numpy as np # type: ignore
+import numpy as np
 
 logger = logging.getLogger(__name__)
 

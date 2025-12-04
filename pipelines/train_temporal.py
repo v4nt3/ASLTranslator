@@ -14,7 +14,7 @@ from pathlib import Path
 from tqdm import tqdm # type: ignore
 import logging
 import json
-from typing import Dict, Tuple
+from typing import Tuple
 import argparse
 
 from pipelines.models_temporal import get_temporal_model
