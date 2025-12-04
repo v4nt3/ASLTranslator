@@ -1,43 +1,8 @@
 [
   {
-    "class_name": 159,
+    "class_name": 742,
     "accuracy": 0.0,
     "num_samples": 5
-  },
-  {
-    "class_name": 302,
-    "accuracy": 0.0,
-    "num_samples": 6
-  },
-  {
-    "class_name": 342,
-    "accuracy": 0.0,
-    "num_samples": 6
-  },
-  {
-    "class_name": 453,
-    "accuracy": 0.0,
-    "num_samples": 9
-  },
-  {
-    "class_name": 502,
-    "accuracy": 0.0,
-    "num_samples": 7
-  },
-  {
-    "class_name": 530,
-    "accuracy": 0.0,
-    "num_samples": 8
-  },
-  {
-    "class_name": 552,
-    "accuracy": 0.0,
-    "num_samples": 7
-  },
-  {
-    "class_name": 555,
-    "accuracy": 0.0,
-    "num_samples": 20
   },
   {
     "class_name": 934,
@@ -45,24 +10,24 @@
     "num_samples": 11
   },
   {
-    "class_name": 1095,
-    "accuracy": 0.0,
-    "num_samples": 8
-  },
-  {
-    "class_name": 1315,
-    "accuracy": 0.0,
-    "num_samples": 8
-  },
-  {
-    "class_name": 1637,
+    "class_name": 997,
     "accuracy": 0.0,
     "num_samples": 6
   },
   {
-    "class_name": 1787,
+    "class_name": 1164,
     "accuracy": 0.0,
-    "num_samples": 15
+    "num_samples": 5
+  },
+  {
+    "class_name": 1800,
+    "accuracy": 0.0,
+    "num_samples": 7
+  },
+  {
+    "class_name": 1834,
+    "accuracy": 0.0,
+    "num_samples": 9
   },
   {
     "class_name": 1926,
@@ -70,52 +35,42 @@
     "num_samples": 10
   },
   {
-    "class_name": 1427,
-    "accuracy": 0.05,
-    "num_samples": 20
-  },
-  {
-    "class_name": 142,
+    "class_name": 1797,
     "accuracy": 0.05555555555555555,
     "num_samples": 18
   },
   {
-    "class_name": 722,
+    "class_name": 1118,
     "accuracy": 0.06666666666666667,
     "num_samples": 15
   },
   {
-    "class_name": 1416,
-    "accuracy": 0.06666666666666667,
-    "num_samples": 15
-  },
-  {
-    "class_name": 2103,
-    "accuracy": 0.06666666666666667,
-    "num_samples": 15
-  },
-  {
-    "class_name": 134,
-    "accuracy": 0.07142857142857142,
-    "num_samples": 14
-  },
-  {
-    "class_name": 634,
+    "class_name": 157,
     "accuracy": 0.08333333333333333,
     "num_samples": 12
   },
   {
-    "class_name": 1935,
+    "class_name": 1194,
     "accuracy": 0.08333333333333333,
     "num_samples": 12
   },
   {
-    "class_name": 7,
+    "class_name": 1424,
+    "accuracy": 0.08333333333333333,
+    "num_samples": 12
+  },
+  {
+    "class_name": 186,
     "accuracy": 0.09090909090909091,
     "num_samples": 11
   },
   {
-    "class_name": 186,
+    "class_name": 532,
+    "accuracy": 0.09090909090909091,
+    "num_samples": 11
+  },
+  {
+    "class_name": 1645,
     "accuracy": 0.09090909090909091,
     "num_samples": 11
   },
@@ -125,9 +80,9 @@
     "num_samples": 11
   },
   {
-    "class_name": 1877,
-    "accuracy": 0.09090909090909091,
-    "num_samples": 11
+    "class_name": 110,
+    "accuracy": 0.1,
+    "num_samples": 10
   },
   {
     "class_name": 471,
@@ -135,18 +90,63 @@
     "num_samples": 10
   },
   {
-    "class_name": 1675,
+    "class_name": 587,
     "accuracy": 0.1,
     "num_samples": 10
   },
   {
-    "class_name": 230,
+    "class_name": 1616,
     "accuracy": 0.1111111111111111,
     "num_samples": 9
   },
   {
-    "class_name": 1187,
+    "class_name": 2013,
     "accuracy": 0.1111111111111111,
     "num_samples": 9
+  },
+  {
+    "class_name": 489,
+    "accuracy": 0.125,
+    "num_samples": 8
+  },
+  {
+    "class_name": 1245,
+    "accuracy": 0.125,
+    "num_samples": 8
+  },
+  {
+    "class_name": 1315,
+    "accuracy": 0.125,
+    "num_samples": 8
+  },
+  {
+    "class_name": 1962,
+    "accuracy": 0.125,
+    "num_samples": 8
+  },
+  {
+    "class_name": 722,
+    "accuracy": 0.13333333333333333,
+    "num_samples": 15
+  },
+  {
+    "class_name": 1787,
+    "accuracy": 0.13333333333333333,
+    "num_samples": 15
+  },
+  {
+    "class_name": 1824,
+    "accuracy": 0.13333333333333333,
+    "num_samples": 15
+  },
+  {
+    "class_name": 516,
+    "accuracy": 0.14285714285714285,
+    "num_samples": 7
+  },
+  {
+    "class_name": 988,
+    "accuracy": 0.14285714285714285,
+    "num_samples": 7
   }
 ]
