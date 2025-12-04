@@ -62,7 +62,7 @@ class TemporalLSTMClassifier(nn.Module):
         hidden_dim: int = 512,
         num_layers: int = 2,
         num_classes: int = 2286,
-        dropout: float = 0.3,
+        dropout: float = 0.4,
         bidirectional: bool = True,
         use_attention: bool = False  # Add attention parameter
     ):
