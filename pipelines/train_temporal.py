@@ -256,6 +256,7 @@ class TemporalTrainer:
         logger.info(f"Iniciando entrenamiento por {self.num_epochs} epochs")
         logger.info(f"{'='*60}\n")
         
+        patience_counter = 0
         for epoch in range(self.num_epochs):
             logger.info(f"\nEpoch {epoch + 1}/{self.num_epochs}")
             
@@ -264,7 +265,7 @@ class TemporalTrainer:
             val_loss, val_accuracy, val_top5 = self.validate(val_loader)
             
             # Scheduler step
-            self.scheduler.step()
+            self.scheduler.step(val_loss)
             
             self.history['train_loss'].append(train_loss)
             self.history['train_accuracy'].append(train_acc)
@@ -274,6 +275,7 @@ class TemporalTrainer:
             self.history['val_top5_accuracy'].append(val_top5)
             self.history['learning_rate'].append(self.optimizer.param_groups[0]['lr'])
             
+            logger.info(f"  Early Stopping Patience: {patience_counter}/{config.training.early_stopping_patience}")
             logger.info(f"   Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Train Top-5: {train_top5:.4f}")
             logger.info(f"   Val Loss: {val_loss:.4f} | Val Acc: {val_accuracy:.4f} | Val Top-5: {val_top5:.4f}")
             logger.info(f"   LR: {self.optimizer.param_groups[0]['lr']:.6f}")
@@ -284,9 +286,12 @@ class TemporalTrainer:
                 best_path = self.checkpoint_dir / "best_model.pt"
                 torch.save(self.model.state_dict(), best_path)
                 logger.info(f"   ★ Best model saved! Accuracy: {val_accuracy:.4f}")
+                patience_counter = 0
+            else:
+                patience_counter += 1
             
             # Save checkpoint every 5 epochs
-            if (epoch + 1) % 5 == 0:
+            if (epoch + 1) % 15 == 0:
                 checkpoint_path = self.checkpoint_dir / f"checkpoint_epoch_{epoch+1}.pt"
                 torch.save({
                     'epoch': epoch,
@@ -295,6 +300,10 @@ class TemporalTrainer:
                     'val_accuracy': val_accuracy,
                 }, checkpoint_path)
         
+            if patience_counter >= config.training.early_stopping_patience:
+                logger.info(f"Early stopping activado. No hay mejora en {config.training.early_stopping_patience} epochs.")
+                logger.info(f"Mejor Val Accuracy: {self.best_val_acc:.4f}")
+                break
         # Save final model
         final_path = self.checkpoint_dir / "final_model.pt"
         torch.save(self.model.state_dict(), final_path)
