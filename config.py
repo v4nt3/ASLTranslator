@@ -168,14 +168,14 @@ class ModelConfig:
 class TrainingConfig:
     """Configuración del entrenamiento"""
     # Básico
-    num_epochs: int = 100
+    num_epochs: int = 150
     batch_size: int = 128
     num_workers: int = 10
     pin_memory: bool = False
     
     # Optimización
     optimizer: str = "adam"
-    learning_rate: float = 1e-3
+    learning_rate: float = 3e-4
     weight_decay: float = 1e-5
     momentum: float = 0.9
     
