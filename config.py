@@ -175,7 +175,7 @@ class TrainingConfig:
     
     # Optimización
     optimizer: str = "adam"
-    learning_rate: float = 3e-4
+    learning_rate: float = 2e-4
     weight_decay: float = 1e-5
     momentum: float = 0.9
     

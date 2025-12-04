@@ -111,15 +111,24 @@ class TemporalTrainer:
             weight_decay=weight_decay
         )
         
+
+        self.scheduler = optim.lr_scheduler.OneCycleLR(
+            self.optimizer,
+            max_lr=config.training.learning_rate,
+            total_steps=config.training.num_epochs,
+            pct_start=config.training.pct_start,
+            div_factor=config.training.lr_div_factor
+            )
+        
         # Scheduler
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, 
-            mode='min',
-            factor=0.3,
-            patience=5,
-            threshold=1e-4,
-            min_lr=1e-6
-        )
+        # self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        #     self.optimizer, 
+        #     mode='min',
+        #     factor=0.3,
+        #     patience=5,
+        #     threshold=1e-4,
+        #     min_lr=1e-6
+        # )
         
         # Loss
         self.criterion = nn.CrossEntropyLoss(label_smoothing=0.15)
