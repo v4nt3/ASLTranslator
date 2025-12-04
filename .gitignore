@@ -41,7 +41,6 @@ env/
 *.pickle
 *.weights
 models/
-checkpoints/
 
 # ───────────────────────────────
 # DATOS GRANDES
