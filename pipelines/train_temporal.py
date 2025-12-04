@@ -16,9 +16,9 @@ import json
 from typing import Dict, Tuple
 import argparse
 
-from models_temporal import get_temporal_model
-from dataset_temporal import create_temporal_dataloaders
-from evaluate_temporal import evaluate_model_comprehensive
+from pipelines.models_temporal import get_temporal_model
+from pipelines.dataset_temporal import create_temporal_dataloaders
+from pipelines.evaluate_temporal import evaluate_model_comprehensive
 
 from config import config
 
