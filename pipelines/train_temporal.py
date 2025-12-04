@@ -230,7 +230,7 @@ class TemporalTrainer:
             val_loss, val_accuracy, val_top5 = self.validate(val_loader)
             
             # Scheduler step
-            self.scheduler.step()
+            self.scheduler.step(val_loss)
             
             self.history['train_loss'].append(train_loss)
             self.history['train_accuracy'].append(train_acc)
