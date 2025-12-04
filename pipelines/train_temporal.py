@@ -2,63 +2,32 @@
 Script de entrenamiento optimizado para modelo temporal
 Entrena SOLO la parte temporal (LSTM/Transformer + Classifier)
 Carga directamente desde carpeta features_fused sin necesidad de CSV
-Todas las configuraciones se manejan desde config.py
 """
 
-import torch # type: ignore
-import torch.nn as nn # type: ignore
-import torch.optim as optim # type: ignore
-from torch.cuda.amp import GradScaler, autocast # type: ignore
-import numpy as np # type: ignore
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.cuda.amp import GradScaler, autocast
+import numpy as np
 from pathlib import Path
-from tqdm import tqdm # type: ignore
+from tqdm import tqdm
 import logging
 import json
-from typing import Tuple
+from typing import Dict, Tuple
 import argparse
 
-from pipelines.models_temporal import get_temporal_model
-from pipelines.dataset_temporal import create_temporal_dataloaders
-from pipelines.evaluate_temporal import evaluate_model_comprehensive
-from pipelines.augmentation_temporal import create_augmented_dataloaders  # Import augmentation
+from models_temporal import get_temporal_model
+from dataset_temporal import create_temporal_dataloaders
+from evaluate_temporal import evaluate_model_comprehensive
 
 from config import config
 
-def setup_logging(checkpoint_dir: Path):
-    """Configura logging para consola y archivo"""
-    # Crear directorio de checkpoints si no existe
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Archivo de log
-    log_file = checkpoint_dir / "training.log"
-    
-    # Limpiar handlers anteriores
-    logger = logging.getLogger(__name__)
-    logger.handlers.clear()
-    
-    # Formato
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    
-    # Handler para consola
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(formatter)
-    
-    # Handler para archivo
-    file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(formatter)
-    
-    # Agregar handlers
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
-    logger.setLevel(logging.INFO)
-    
-    logger.info(f"Logging iniciado - guardando en: {log_file}")
-    
-    return logger
-
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
 
 class TemporalTrainer:
     """Entrenador para modelos temporales con features precomputadas"""
@@ -72,8 +41,7 @@ class TemporalTrainer:
         num_epochs: int = None,
         device: str = None,
         use_amp: bool = None,
-        checkpoint_dir: Path = None,
-        use_attention: bool = False  # Add attention parameter
+        checkpoint_dir: Path = None
     ):
         if num_classes is None:
             num_classes = config.model.num_classes
@@ -97,13 +65,10 @@ class TemporalTrainer:
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         
-        global logger
-        logger = setup_logging(self.checkpoint_dir)
-        
+        # Modelo
         self.model = get_temporal_model(
             model_type=model_type,
-            num_classes=num_classes,
-            use_attention=use_attention
+            num_classes=num_classes
         ).to(self.device)
         
          # Optimizer
@@ -145,7 +110,6 @@ class TemporalTrainer:
         logger.info(f"   Device: {self.device}")
         logger.info(f"   Model type: {model_type}")
         logger.info(f"   Num classes: {num_classes}")
-        logger.info(f"   Use attention: {use_attention}")  # Log attention
         logger.info(f"   Use AMP: {use_amp}")
     
     def train_epoch(self, train_loader) -> Tuple[float, float, float]:
@@ -266,7 +230,7 @@ class TemporalTrainer:
             val_loss, val_accuracy, val_top5 = self.validate(val_loader)
             
             # Scheduler step
-            self.scheduler.step(val_loss)
+            self.scheduler.step()
             
             self.history['train_loss'].append(train_loss)
             self.history['train_accuracy'].append(train_acc)
@@ -328,8 +292,6 @@ def main():
                        help="Tipo de modelo temporal")
     parser.add_argument("--num_classes", type=int, default=None,
                        help=f"Numero de clases (default: {config.model.num_classes})")
-    parser.add_argument("--use_attention", action="store_true",  # Add attention flag
-                       help="Usar modulo de attention en LSTM (mejora accuracy)")
     
     # Training
     parser.add_argument("--batch_size", type=int, default=None,
@@ -389,6 +351,7 @@ def main():
         val_split=val_split
     )
     
+    # Crear trainer
     trainer = TemporalTrainer(
         model_type=args.model_type,
         num_classes=args.num_classes,
@@ -397,8 +360,7 @@ def main():
         num_epochs=args.num_epochs,
         device=args.device,
         use_amp=not args.no_amp,
-        checkpoint_dir=checkpoint_dir,
-        use_attention=args.use_attention
+        checkpoint_dir=checkpoint_dir
     )
     
     # Entrenar
@@ -416,7 +378,7 @@ def main():
         # Ejecutar evaluación completa
         evaluate_model_comprehensive(
             model=trainer.model,
-            test_loader=test_loader,  # Usar test_loader como test
+            test_loader=val_loader,  # Usar val_loader como test
             device=trainer.device,
             num_classes=trainer.num_classes,
             save_dir=checkpoint_dir / "evaluation_results",

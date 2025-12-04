@@ -126,7 +126,7 @@ class ModelConfig:
     """Configuración del modelo multimodal"""
     # Arquitectura
     backbone_name: str = "efficientnet_b3"  # o "resnet34"
-    embedding_dim: int = 768
+    embedding_dim: int = 512
     fusion_type: str = "temporal_transformer"  # concat, sum, temporal_transformer
     
     # Backbone visual
