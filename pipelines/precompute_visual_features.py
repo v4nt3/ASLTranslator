@@ -1,6 +1,6 @@
 """
 Script para precomputar features visuales usando ResNet101 frozen
-Convierte clips (T, H, W, 3) → (T, 512) en float16
+Convierte clips (T, H, W, 3) → (T, 1024) en float16
 """
 
 import torch
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class ResNet101FeatureExtractor(nn.Module):
     """Extractor de features usando ResNet101 frozen"""
     
-    def __init__(self, output_dim=512):
+    def __init__(self, output_dim=1024):
         super().__init__()
         
         # Cargar ResNet101 pretrained
@@ -33,7 +33,7 @@ class ResNet101FeatureExtractor(nn.Module):
         # Remover la última capa FC para obtener features (2048 dims)
         self.feature_extractor = nn.Sequential(*list(resnet.children())[:-1])
         
-        # Projection a 512 dims
+        # Projection a 1024 dims
         self.projection = nn.Linear(2048, output_dim)
         
         # Freeze todo
@@ -50,11 +50,11 @@ class ResNet101FeatureExtractor(nn.Module):
         Args:
             x: (B, C, H, W) tensor de frames
         Returns:
-            features: (B, 512)
+            features: (B, 1024)
         """
         features = self.feature_extractor(x)  # (B, 2048, 1, 1)
         features = features.squeeze(-1).squeeze(-1)  # (B, 2048)
-        features = self.projection(features)  # (B, 512)
+        features = self.projection(features)  # (B, 1024)
         return features
 
 
@@ -109,7 +109,7 @@ def precompute_visual_features(
     skipped = 0
     errors = 0
     
-    for frame_file in tqdm(frame_files, desc="🔧 Extrayendo features visuales"):
+    for frame_file in tqdm(frame_files, desc="Extrayendo features visuales"):
         clip_name = frame_file.stem.replace("_frames", "")
         output_file = output_dir / f"{clip_name}_visual.npy"
         
@@ -152,14 +152,14 @@ def precompute_visual_features(
                 batch_tensor = torch.stack(batch_tensors).to(device)
                 
                 # Extraer features
-                features = model(batch_tensor)  # (B, 512)
+                features = model(batch_tensor)  # (B, 1024)
                 all_features.append(features.cpu().numpy())
             
             # Concatenar todos los features
-            visual_features = np.concatenate(all_features, axis=0)  # (T, 512)
+            visual_features = np.concatenate(all_features, axis=0)  # (T, 1024)
             
             # Validar shape
-            assert visual_features.shape == (T, 512), f"Shape inesperado: {visual_features.shape}"
+            assert visual_features.shape == (T, 1024), f"Shape inesperado: {visual_features.shape}"
             
             # Guardar en float16 para ahorrar espacio
             visual_features = visual_features.astype(np.float16)

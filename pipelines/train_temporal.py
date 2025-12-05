@@ -105,7 +105,7 @@ class TemporalTrainer:
         ).to(self.device)
         
         # Optimizer
-        self.optimizer = optim.Adam(
+        self.optimizer = optim.AdamW(
             self.model.parameters(),
             lr=learning_rate,
             weight_decay=weight_decay
