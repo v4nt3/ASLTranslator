@@ -4,6 +4,8 @@ Crea (T, 640) = concatenate((T, 512), (T, 128))
 Opcionalmente borra los archivos originales de frames y keypoints
 """
 
+import torch
+import torch.nn as nn
 import numpy as np #type: ignore
 from pathlib import Path
 from tqdm import tqdm #type: ignore
@@ -14,6 +16,17 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+class FusionProjector(nn.Module):
+    def __init__(self, input_dim=640, output_dim=1024):
+        super().__init__()
+        self.proj = nn.Sequential(
+            nn.Linear(input_dim, output_dim),
+            nn.ReLU()
+        )
+
+    def forward(self, x):
+        return self.proj(x)
 
 
 def safe_delete_file(file_path: Path, max_retries: int = 3) -> bool:
@@ -79,6 +92,11 @@ def fuse_features(
     errors = 0
     deleted_frames = 0
     deleted_keypoints = 0
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    fusion_layer = FusionProjector(input_dim=640, output_dim=1024).to(device)
+    fusion_layer.eval()
+
     
     for visual_file in tqdm(visual_files, desc=" Fusionando features"):
         clip_name = visual_file.stem.replace("_visual", "")
@@ -130,11 +148,20 @@ def fuse_features(
                 pose_features = pose_features[:T_min]
                 logger.warning(f"   → Truncando a T={T_min}")
             
-            # Fusionar (concatenar)
-            fused_features = np.concatenate([visual_features, pose_features], axis=1)  # (T, 640)
-            
+
+            # crear concat
+            concat = np.concatenate([visual_features, pose_features], axis=1)  # (T, 640)
+
+            # Pasar por la MLP para ampliar (sin gradientes)
+            concat_tensor = torch.from_numpy(concat.astype(np.float32)).to(device)
+            with torch.no_grad():
+                fused_tensor = fusion_layer(concat_tensor)  # tensor en device
+
+            # Convertir a numpy de forma segura
+            fused_features = fused_tensor.detach().cpu().numpy()  # (T, 1024)
+
             # Validar shape final
-            assert fused_features.shape[1] == 640, f"Shape inesperado: {fused_features.shape}"
+            assert fused_features.shape[1] == 1024, f"Shape inesperado: {fused_features.shape}"
             
             # Guardar en float16
             fused_features = fused_features.astype(np.float16)
@@ -225,3 +252,4 @@ if __name__ == "__main__":
         clips_dir=args.clips_dir,
         delete_originals=args.delete_originals
     )
+
