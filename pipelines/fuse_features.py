@@ -1,14 +1,14 @@
 """
-Script para fusionar features visuales y de pose
-Crea (T, 640) = concatenate((T, 512), (T, 128))
-Opcionalmente borra los archivos originales de frames y keypoints
+Script CORREGIDO para fusionar features visuales y de pose
+Crea (T, 1152) = concatenate((T, 1024), (T, 128))
+SIN proyección adicional para mantener toda la información
 """
 
 import torch
 import torch.nn as nn
-import numpy as np #type: ignore
+import numpy as np
 from pathlib import Path
-from tqdm import tqdm #type: ignore
+from tqdm import tqdm
 import logging
 
 logging.basicConfig(
@@ -17,28 +17,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class FusionProjector(nn.Module):
-    def __init__(self, input_dim=640, output_dim=1024):
-        super().__init__()
-        self.proj = nn.Sequential(
-            nn.Linear(input_dim, output_dim),
-            nn.ReLU()
-        )
-
-    def forward(self, x):
-        return self.proj(x)
-
 
 def safe_delete_file(file_path: Path, max_retries: int = 3) -> bool:
     """
     Intenta borrar un archivo de forma segura con reintentos
-    
-    Args:
-        file_path: Ruta al archivo
-        max_retries: Número máximo de intentos
-    
-    Returns:
-        True si se borró exitosamente, False en caso contrario
     """
     if not file_path.exists():
         return True
@@ -52,7 +34,7 @@ def safe_delete_file(file_path: Path, max_retries: int = 3) -> bool:
             import time
             time.sleep(0.5)
         except Exception as e:
-            logger.error(f" Error borrando {file_path.name}: {str(e)}")
+            logger.error(f"✗ Error borrando {file_path.name}: {str(e)}")
             return False
     
     return False
@@ -66,7 +48,7 @@ def fuse_features(
     delete_originals: bool = False
 ):
     """
-    Fusiona features visuales y de pose
+    Fusiona features visuales y de pose mediante concatenación simple
     
     Args:
         visual_dir: Directorio con archivos *_visual.npy
@@ -80,10 +62,10 @@ def fuse_features(
     
     # Buscar todos los archivos visuales
     visual_files = sorted(visual_dir.glob("*_visual.npy"))
-    logger.info(f" Encontrados {len(visual_files)} archivos visuales")
+    logger.info(f"Encontrados {len(visual_files)} archivos visuales")
     
     if len(visual_files) == 0:
-        logger.error(f" No se encontraron archivos *_visual.npy en {visual_dir}")
+        logger.error(f"✗ No se encontraron archivos *_visual.npy en {visual_dir}")
         return
     
     # Contadores
@@ -92,13 +74,8 @@ def fuse_features(
     errors = 0
     deleted_frames = 0
     deleted_keypoints = 0
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    fusion_layer = FusionProjector(input_dim=640, output_dim=1024).to(device)
-    fusion_layer.eval()
-
     
-    for visual_file in tqdm(visual_files, desc=" Fusionando features"):
+    for visual_file in tqdm(visual_files, desc="Fusionando features"):
         clip_name = visual_file.stem.replace("_visual", "")
         pose_file = pose_dir / f"{clip_name}_pose.npy"
         output_file = output_dir / f"{clip_name}_fused.npy"
@@ -148,21 +125,13 @@ def fuse_features(
                 pose_features = pose_features[:T_min]
                 logger.warning(f"   → Truncando a T={T_min}")
             
-
-            # crear concat
-            concat = np.concatenate([visual_features, pose_features], axis=1)  # (T, 1152)
-            # Pasar por la MLP para ampliar (sin gradientes)
-            concat_tensor = torch.from_numpy(concat.astype(np.float32)).to(device)
-            with torch.no_grad():
-                fused_tensor = fusion_layer(concat_tensor)  # tensor en device
-
-            # Convertir a numpy de forma segura
-            fused_features = fused_tensor.detach().cpu().numpy()  # (T, 1024)
-
-            # Validar shape final
-            assert fused_features.shape[1] == 1024, f"Shape inesperado: {fused_features.shape}"
+            # Mantiene toda la información: (T, 1024) + (T, 128) = (T, 1152)
+            fused_features = np.concatenate([visual_features, pose_features], axis=1)  # (T, 1152)
             
-            # Guardar en float16
+            # Validar shape final
+            assert fused_features.shape[1] == 1152, f"Shape inesperado: {fused_features.shape}"
+            
+            # Guardar en float16 para ahorrar espacio
             fused_features = fused_features.astype(np.float16)
             np.save(output_file, fused_features)
             
@@ -180,12 +149,12 @@ def fuse_features(
                     deleted_keypoints += 1
             
         except Exception as e:
-            logger.error(f" Error fusionando {clip_name}: {str(e)}")
+            logger.error(f"✗ Error fusionando {clip_name}: {str(e)}")
             errors += 1
             continue
     
     logger.info(f"\n{'='*60}")
-    logger.info(f" Fusión completada!")
+    logger.info(f"✓ Fusión completada!")
     logger.info(f"   ✓ Procesados: {processed}")
     logger.info(f"   ⊘ Omitidos (ya existían): {skipped}")
     logger.info(f"   ✗ Errores: {errors}")
@@ -234,14 +203,14 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    logger.info(" Iniciando fusión de features")
+    logger.info("Iniciando fusión de features")
     logger.info(f"   Visual dir: {args.visual_dir}")
     logger.info(f"   Pose dir: {args.pose_dir}")
     logger.info(f"   Output dir: {args.output_dir}")
     logger.info(f"   Delete originals: {args.delete_originals}\n")
     
     if args.delete_originals:
-        logger.warning("  ATENCIÓN: Se borrarán los archivos originales después de fusionar")
+        logger.warning(" ATENCIÓN: Se borrarán los archivos originales después de fusionar")
         logger.warning("    Asegúrate de tener backups si es necesario\n")
     
     fuse_features(
@@ -251,4 +220,3 @@ if __name__ == "__main__":
         clips_dir=args.clips_dir,
         delete_originals=args.delete_originals
     )
-
