@@ -3,9 +3,9 @@ Dataset optimizado para cargar features precomputadas (.npy fusionados)
 Carga directamente desde carpeta sin necesidad de CSV
 """
 
-import torch
+import torch #type: ignore
 import numpy as np
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader #type: ignore
 from pathlib import Path
 from typing import Tuple, List
 import logging

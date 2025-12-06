@@ -4,13 +4,13 @@ Entrena SOLO la parte temporal (LSTM/Transformer + Classifier)
 Carga directamente desde carpeta features_fused sin necesidad de CSV
 """
 
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.cuda.amp import GradScaler, autocast
+import torch #type: ignore
+import torch.nn as nn #type: ignore
+import torch.optim as optim #type: ignore
+from torch.cuda.amp import GradScaler, autocast #type: ignore
 import numpy as np
 from pathlib import Path
-from tqdm import tqdm
+from tqdm import tqdm #type: ignore
 import logging
 import json
 from typing import Tuple
