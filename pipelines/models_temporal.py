@@ -58,7 +58,7 @@ class TemporalLSTMClassifier(nn.Module):
     
     def __init__(
         self,
-        input_dim: int = 1024,
+        input_dim: int = 1152,
         hidden_dim: int = 512,
         num_layers: int = 2,
         num_classes: int = 2286,
