@@ -34,7 +34,7 @@ class DataPaths:
     features_fused: Path = DATA_ROOT / "features_fused"
     dataset_csv: Path = DATA_ROOT / "dataset.csv"
     dataset_split_csv: Path = DATA_ROOT / "dataset_split.csv"
-    dataset_meta: Path = DATA_ROOT / "dataset_meta.json"  # Agregando ruta a dataset_meta.json para carga directa sin CSV
+    dataset_meta: Path = DATA_ROOT / "dataset_metadata.json"  # Agregando ruta a dataset_meta.json para carga directa sin CSV
     
     def __post_init__(self):
         for path in [
