@@ -116,7 +116,7 @@ def fuse_features(
         
         try:
             # Cargar ambos features
-            visual_features = np.load(visual_file)  # (T, 512)
+            visual_features = np.load(visual_file)  # (T, 1024)
             pose_features = np.load(pose_file)  # (T, 128)
             
             # Validar shapes
@@ -130,8 +130,8 @@ def fuse_features(
             T_pose, D_pose = pose_features.shape
             
             # Validar dimensiones de features
-            if D_visual != 512:
-                logger.warning(f" Dimensión visual inesperada para {clip_name}: {D_visual} (esperado 512)")
+            if D_visual != 1024:
+                logger.warning(f" Dimensión visual inesperada para {clip_name}: {D_visual} (esperado 1024)")
                 errors += 1
                 continue
             
@@ -150,8 +150,7 @@ def fuse_features(
             
 
             # crear concat
-            concat = np.concatenate([visual_features, pose_features], axis=1)  # (T, 640)
-
+            concat = np.concatenate([visual_features, pose_features], axis=1)  # (T, 1152)
             # Pasar por la MLP para ampliar (sin gradientes)
             concat_tensor = torch.from_numpy(concat.astype(np.float32)).to(device)
             with torch.no_grad():

@@ -18,7 +18,7 @@ class AttentionModule(nn.Module):
         super().__init__()
         self.attention = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
+            nn.GELU(),
             nn.Linear(hidden_dim, 1)
         )
     
@@ -59,7 +59,7 @@ class TemporalLSTMClassifier(nn.Module):
     def __init__(
         self,
         input_dim: int = 1152,
-        hidden_dim: int = 512,
+        hidden_dim: int = 768,
         num_layers: int = 2,
         num_classes: int = 2286,
         dropout: float = 0.3,
@@ -91,20 +91,21 @@ class TemporalLSTMClassifier(nn.Module):
             self.attention = AttentionModule(lstm_output_dim)
         
         self.classifier = nn.Sequential(
-            nn.Linear(lstm_output_dim, 1024),
+            nn.Linear(lstm_output_dim, 2048),
             nn.GELU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.4),
+
+            nn.Linear(2048, 1024),
+            nn.GELU(),
+            nn.Dropout(0.4),
 
             nn.Linear(1024, 512),
             nn.GELU(),
             nn.Dropout(0.3),
 
-            nn.Linear(512, 256),
-            nn.GELU(),
-            nn.Dropout(0.3),
-
-            nn.Linear(256, num_classes)
+            nn.Linear(512, num_classes)
         )
+
 
         # # Clasificador
         # self.classifier = nn.Sequential(
@@ -128,7 +129,7 @@ class TemporalLSTMClassifier(nn.Module):
     def forward(self, x: torch.Tensor, lengths: torch.Tensor = None) -> torch.Tensor:
         """
         Args:
-            x: (B, T, 640) features precomputadas
+            x: (B, T, 1152) features precomputadas
             lengths: (B,) longitudes reales de cada secuencia (opcional)
         
         Returns:
@@ -166,121 +167,121 @@ class TemporalLSTMClassifier(nn.Module):
         return logits
 
 
-class TemporalTransformerClassifier(nn.Module):
-    """
-    Clasificador temporal con Transformer
-    Input: (B, T, 640) features precomputadas
-    Output: (B, num_classes) logits
-    """
+# class TemporalTransformerClassifier(nn.Module):
+#     """
+#     Clasificador temporal con Transformer
+#     Input: (B, T, 640) features precomputadas
+#     Output: (B, num_classes) logits
+#     """
     
-    def __init__(
-        self,
-        input_dim: int = 640,
-        d_model: int = 512,
-        nhead: int = 8,
-        num_layers: int = 4,
-        dim_feedforward: int = 2048,
-        num_classes: int = 2286,
-        dropout: float = 0.3
-    ):
-        super().__init__()
+#     def __init__(
+#         self,
+#         input_dim: int = 640,
+#         d_model: int = 512,
+#         nhead: int = 8,
+#         num_layers: int = 4,
+#         dim_feedforward: int = 2048,
+#         num_classes: int = 2286,
+#         dropout: float = 0.3
+#     ):
+#         super().__init__()
         
-        self.input_dim = input_dim
-        self.d_model = d_model
+#         self.input_dim = input_dim
+#         self.d_model = d_model
         
-        # Projection de input a d_model
-        self.input_projection = nn.Linear(input_dim, d_model)
+#         # Projection de input a d_model
+#         self.input_projection = nn.Linear(input_dim, d_model)
         
-        # Positional encoding
-        self.pos_encoder = PositionalEncoding(d_model, dropout)
+#         # Positional encoding
+#         self.pos_encoder = PositionalEncoding(d_model, dropout)
         
-        # Transformer encoder
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            batch_first=True
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+#         # Transformer encoder
+#         encoder_layer = nn.TransformerEncoderLayer(
+#             d_model=d_model,
+#             nhead=nhead,
+#             dim_feedforward=dim_feedforward,
+#             dropout=dropout,
+#             batch_first=True
+#         )
+#         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
-        # Clasificador
-        self.classifier = nn.Sequential(
-            nn.Linear(d_model, 512),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(512, 256),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(256, num_classes)
-        )
+#         # Clasificador
+#         self.classifier = nn.Sequential(
+#             nn.Linear(d_model, 512),
+#             nn.ReLU(),
+#             nn.Dropout(dropout),
+#             nn.Linear(512, 256),
+#             nn.ReLU(),
+#             nn.Dropout(dropout),
+#             nn.Linear(256, num_classes)
+#         )
         
-        logger.info(f"✓ TemporalTransformerClassifier inicializado")
-        logger.info(f"   Input dim: {input_dim}")
-        logger.info(f"   d_model: {d_model}")
-        logger.info(f"   Num layers: {num_layers}")
-        logger.info(f"   Num heads: {nhead}")
-        logger.info(f"   Num classes: {num_classes}")
+#         logger.info(f"✓ TemporalTransformerClassifier inicializado")
+#         logger.info(f"   Input dim: {input_dim}")
+#         logger.info(f"   d_model: {d_model}")
+#         logger.info(f"   Num layers: {num_layers}")
+#         logger.info(f"   Num heads: {nhead}")
+#         logger.info(f"   Num classes: {num_classes}")
     
-    def forward(self, x: torch.Tensor, lengths: torch.Tensor = None) -> torch.Tensor:
-        """
-        Args:
-            x: (B, T, 640) features precomputadas
-            lengths: (B,) longitudes reales de cada secuencia (opcional)
+#     def forward(self, x: torch.Tensor, lengths: torch.Tensor = None) -> torch.Tensor:
+#         """
+#         Args:
+#             x: (B, T, 640) features precomputadas
+#             lengths: (B,) longitudes reales de cada secuencia (opcional)
         
-        Returns:
-            logits: (B, num_classes)
-        """
-        # Proyectar input
-        x = self.input_projection(x)  # (B, T, d_model)
+#         Returns:
+#             logits: (B, num_classes)
+#         """
+#         # Proyectar input
+#         x = self.input_projection(x)  # (B, T, d_model)
         
-        # Positional encoding
-        x = self.pos_encoder(x)
+#         # Positional encoding
+#         x = self.pos_encoder(x)
         
-        # Crear mask si tenemos longitudes
-        if lengths is not None:
-            B, T = x.shape[0], x.shape[1]
-            mask = torch.arange(T, device=x.device)[None, :] >= lengths[:, None]
-        else:
-            mask = None
+#         # Crear mask si tenemos longitudes
+#         if lengths is not None:
+#             B, T = x.shape[0], x.shape[1]
+#             mask = torch.arange(T, device=x.device)[None, :] >= lengths[:, None]
+#         else:
+#             mask = None
         
-        # Transformer
-        x = self.transformer(x, src_key_padding_mask=mask)  # (B, T, d_model)
+#         # Transformer
+#         x = self.transformer(x, src_key_padding_mask=mask)  # (B, T, d_model)
         
-        # Global average pooling
-        if lengths is not None:
-            # Maskear padding antes de pooling
-            mask_expanded = mask.unsqueeze(-1).expand_as(x)
-            x_masked = x.masked_fill(mask_expanded, 0)
-            x_pooled = x_masked.sum(dim=1) / lengths.unsqueeze(-1).float()
-        else:
-            x_pooled = x.mean(dim=1)  # (B, d_model)
+#         # Global average pooling
+#         if lengths is not None:
+#             # Maskear padding antes de pooling
+#             mask_expanded = mask.unsqueeze(-1).expand_as(x)
+#             x_masked = x.masked_fill(mask_expanded, 0)
+#             x_pooled = x_masked.sum(dim=1) / lengths.unsqueeze(-1).float()
+#         else:
+#             x_pooled = x.mean(dim=1)  # (B, d_model)
         
-        # Clasificación
-        logits = self.classifier(x_pooled)  # (B, num_classes)
+#         # Clasificación
+#         logits = self.classifier(x_pooled)  # (B, num_classes)
         
-        return logits
+#         return logits
 
 
-class PositionalEncoding(nn.Module):
-    """Positional encoding para Transformer"""
+# class PositionalEncoding(nn.Module):
+#     """Positional encoding para Transformer"""
     
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 500):
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
+#     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 500):
+#         super().__init__()
+#         self.dropout = nn.Dropout(p=dropout)
         
-        # Crear positional encoding
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)  # (1, max_len, d_model)
-        self.register_buffer('pe', pe)
+#         # Crear positional encoding
+#         pe = torch.zeros(max_len, d_model)
+#         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+#         div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+#         pe[:, 0::2] = torch.sin(position * div_term)
+#         pe[:, 1::2] = torch.cos(position * div_term)
+#         pe = pe.unsqueeze(0)  # (1, max_len, d_model)
+#         self.register_buffer('pe', pe)
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.pe[:, :x.size(1), :]
-        return self.dropout(x)
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         x = x + self.pe[:, :x.size(1), :]
+#         return self.dropout(x)
 
 
 def get_temporal_model(model_type: str = "lstm", num_classes: int = 2286, **kwargs):
