@@ -154,8 +154,8 @@ class ModelConfig:
     num_attention_heads_lstm: int = 8  # Heads para multihead attention en LSTM
     
     # Clasificador final
-    classifier_hidden_dim: int = 256
-    classifier_dropout: float = 0.3
+    classifier_hidden_dim: int = 1024
+    classifier_dropout: float = 0.2
     num_classes: int = 2286
     
     def __post_init__(self):
@@ -175,7 +175,7 @@ class TrainingConfig:
     
     # Optimización
     optimizer: str = "adam"
-    learning_rate: float = 3e-4
+    learning_rate: float = 1e-4
     weight_decay: float = 1e-4
     momentum: float = 0.9
     
