@@ -58,7 +58,7 @@ class TemporalLSTMClassifier(nn.Module):
     
     def __init__(
         self,
-        input_dim: int = 1152,
+        input_dim: int = 640,
         hidden_dim: int = 512,
         num_layers: int = 2,
         num_classes: int = 2286,
@@ -92,17 +92,17 @@ class TemporalLSTMClassifier(nn.Module):
         
 
         # # Clasificador
-        self.classifier = nn.Sequential(
-            nn.Linear(lstm_output_dim, 256),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(128, num_classes)
-        )
+        # self.classifier = nn.Sequential(
+        #     nn.Linear(lstm_output_dim, 256),
+        #     nn.ReLU(),
+        #     nn.Dropout(dropout),
+        #     nn.Linear(256, 128),
+        #     nn.ReLU(),
+        #     nn.Dropout(dropout),
+        #     nn.Linear(128, num_classes)
+        # )
 
-        # self.classifier = nn.Linear(lstm_output_dim, num_classes)
+        self.classifier = nn.Linear(lstm_output_dim, num_classes)
         
         logger.info(f"✓ TemporalLSTMClassifier inicializado")
         logger.info(f"   Input dim: {input_dim}")

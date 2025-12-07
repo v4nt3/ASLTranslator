@@ -107,9 +107,9 @@ class DataConfig:
     test_split: float = 0.15
     random_seed: int = 42
     
-    visual_feature_dim: int = 1024
+    visual_feature_dim: int = 512
     pose_feature_dim: int = 128
-    fused_feature_dim: int = 1152  # 1024 + 128
+    fused_feature_dim: int = 640  # 512 + 128
     
     def __post_init__(self):
         if self.clips_distribution is None:
