@@ -93,13 +93,13 @@ class TemporalLSTMClassifier(nn.Module):
 
         # # Clasificador
         self.classifier = nn.Sequential(
-            nn.Linear(lstm_output_dim, 512),
+            nn.Linear(lstm_output_dim, 256),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(512, 256),
+            nn.Linear(256, 128),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(256, num_classes)
+            nn.Linear(128, num_classes)
         )
 
         # self.classifier = nn.Linear(lstm_output_dim, num_classes)
@@ -285,6 +285,7 @@ def get_temporal_model(model_type: str = "lstm", num_classes: int = 2286, **kwar
     if model_type == "lstm":
         return TemporalLSTMClassifier(num_classes=num_classes, **kwargs)
     elif model_type == "transformer":
-        return TemporalTransformerClassifier(num_classes=num_classes, **kwargs)
+        # return TemporalTransformerClassifier(num_classes=num_classes, **kwargs)
+        pass
     else:
         raise ValueError(f"Modelo desconocido: {model_type}")
