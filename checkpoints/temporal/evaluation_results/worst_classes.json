@@ -1,38 +1,13 @@
 [
   {
-    "class_name": 116,
-    "accuracy": 0.0,
-    "num_samples": 5
-  },
-  {
     "class_name": 159,
     "accuracy": 0.0,
     "num_samples": 5
   },
   {
-    "class_name": 342,
-    "accuracy": 0.0,
-    "num_samples": 6
-  },
-  {
-    "class_name": 919,
-    "accuracy": 0.0,
-    "num_samples": 8
-  },
-  {
-    "class_name": 934,
-    "accuracy": 0.0,
-    "num_samples": 11
-  },
-  {
     "class_name": 1164,
     "accuracy": 0.0,
     "num_samples": 5
-  },
-  {
-    "class_name": 1315,
-    "accuracy": 0.0,
-    "num_samples": 8
   },
   {
     "class_name": 1633,
@@ -45,39 +20,9 @@
     "num_samples": 5
   },
   {
-    "class_name": 1987,
-    "accuracy": 0.0,
-    "num_samples": 7
-  },
-  {
-    "class_name": 142,
-    "accuracy": 0.05555555555555555,
-    "num_samples": 18
-  },
-  {
-    "class_name": 1118,
-    "accuracy": 0.06666666666666667,
-    "num_samples": 15
-  },
-  {
-    "class_name": 1465,
-    "accuracy": 0.07142857142857142,
-    "num_samples": 14
-  },
-  {
-    "class_name": 370,
-    "accuracy": 0.08333333333333333,
-    "num_samples": 12
-  },
-  {
-    "class_name": 1823,
+    "class_name": 1420,
     "accuracy": 0.09090909090909091,
     "num_samples": 11
-  },
-  {
-    "class_name": 110,
-    "accuracy": 0.1,
-    "num_samples": 10
   },
   {
     "class_name": 1926,
@@ -85,47 +30,32 @@
     "num_samples": 10
   },
   {
-    "class_name": 1975,
-    "accuracy": 0.1,
-    "num_samples": 10
-  },
-  {
-    "class_name": 1834,
+    "class_name": 2013,
     "accuracy": 0.1111111111111111,
     "num_samples": 9
   },
   {
-    "class_name": 2261,
-    "accuracy": 0.1111111111111111,
-    "num_samples": 9
-  },
-  {
-    "class_name": 909,
-    "accuracy": 0.11764705882352941,
-    "num_samples": 17
-  },
-  {
-    "class_name": 2083,
+    "class_name": 919,
     "accuracy": 0.125,
     "num_samples": 8
   },
   {
-    "class_name": 1490,
+    "class_name": 1824,
     "accuracy": 0.13333333333333333,
     "num_samples": 15
   },
   {
-    "class_name": 1787,
-    "accuracy": 0.13333333333333333,
-    "num_samples": 15
-  },
-  {
-    "class_name": 484,
+    "class_name": 552,
     "accuracy": 0.14285714285714285,
     "num_samples": 7
   },
   {
-    "class_name": 502,
+    "class_name": 631,
+    "accuracy": 0.14285714285714285,
+    "num_samples": 7
+  },
+  {
+    "class_name": 988,
     "accuracy": 0.14285714285714285,
     "num_samples": 7
   },
@@ -135,18 +65,88 @@
     "num_samples": 14
   },
   {
-    "class_name": 204,
+    "class_name": 1440,
+    "accuracy": 0.14285714285714285,
+    "num_samples": 7
+  },
+  {
+    "class_name": 342,
     "accuracy": 0.16666666666666666,
     "num_samples": 6
   },
   {
-    "class_name": 468,
-    "accuracy": 0.16666666666666666,
-    "num_samples": 6
-  },
-  {
-    "class_name": 634,
+    "class_name": 1424,
     "accuracy": 0.16666666666666666,
     "num_samples": 12
+  },
+  {
+    "class_name": 1637,
+    "accuracy": 0.16666666666666666,
+    "num_samples": 6
+  },
+  {
+    "class_name": 1687,
+    "accuracy": 0.16666666666666666,
+    "num_samples": 12
+  },
+  {
+    "class_name": 1797,
+    "accuracy": 0.16666666666666666,
+    "num_samples": 18
+  },
+  {
+    "class_name": 1935,
+    "accuracy": 0.16666666666666666,
+    "num_samples": 12
+  },
+  {
+    "class_name": 505,
+    "accuracy": 0.18181818181818182,
+    "num_samples": 11
+  },
+  {
+    "class_name": 1823,
+    "accuracy": 0.18181818181818182,
+    "num_samples": 11
+  },
+  {
+    "class_name": 110,
+    "accuracy": 0.2,
+    "num_samples": 10
+  },
+  {
+    "class_name": 122,
+    "accuracy": 0.2,
+    "num_samples": 5
+  },
+  {
+    "class_name": 742,
+    "accuracy": 0.2,
+    "num_samples": 5
+  },
+  {
+    "class_name": 1118,
+    "accuracy": 0.2,
+    "num_samples": 15
+  },
+  {
+    "class_name": 1240,
+    "accuracy": 0.2,
+    "num_samples": 5
+  },
+  {
+    "class_name": 1675,
+    "accuracy": 0.2,
+    "num_samples": 10
+  },
+  {
+    "class_name": 140,
+    "accuracy": 0.2222222222222222,
+    "num_samples": 9
+  },
+  {
+    "class_name": 453,
+    "accuracy": 0.2222222222222222,
+    "num_samples": 9
   }
 ]
