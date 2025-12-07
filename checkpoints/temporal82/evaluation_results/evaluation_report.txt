@@ -4,9 +4,9 @@ EVALUATION REPORT
 
 Overall Metrics:
 ------------------------------------------------------------
-accuracy            : 0.815982
-top5_accuracy       : 0.921389
-top10_accuracy      : 0.950063
-f1_macro            : 0.812125
-f1_weighted         : 0.811437
+accuracy            : 0.822717
+top5_accuracy       : 0.927595
+top10_accuracy      : 0.952276
+f1_macro            : 0.818537
+f1_weighted         : 0.817074
 
