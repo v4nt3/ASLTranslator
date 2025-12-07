@@ -291,7 +291,7 @@ class TemporalTrainer:
             else:
                 patience_counter += 1
             
-            # Save checkpoint every 5 epochs
+            # Save checkpoint every 15 epochs
             if (epoch + 1) % 15 == 0:
                 checkpoint_path = self.checkpoint_dir / f"checkpoint_epoch_{epoch+1}.pt"
                 torch.save({
