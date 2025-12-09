@@ -8,7 +8,7 @@ import torch #type: ignore
 import torch.nn as nn #type: ignore
 import torch.optim as optim #type: ignore
 from torch.cuda.amp import GradScaler, autocast #type: ignore
-import numpy as np
+import numpy as np #type: ignore
 from pathlib import Path
 from tqdm import tqdm #type: ignore
 import logging
@@ -18,7 +18,7 @@ import argparse
 
 from pipelines.models_temporal import get_temporal_model
 from pipelines.dataset_temporal import create_temporal_dataloaders
-from pipelines.evaluate_temporal import evaluate_model_comprehensive
+from pipelines.evaluate import evaluate_model_comprehensive
 
 from config import config
 
