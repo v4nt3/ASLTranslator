@@ -21,7 +21,7 @@ class AttentionModule(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden_dim, 1)
         )
-        self.norm = nn.LayerNorm(hidden_dim)
+        
     def forward(self, lstm_output: torch.Tensor, lengths: torch.Tensor = None) -> torch.Tensor:
         """
         Args:
@@ -45,7 +45,6 @@ class AttentionModule(nn.Module):
         
         # Compute weighted sum
         context = torch.sum(attention_weights * lstm_output, dim=1)  # (B, hidden_dim)
-        context = self.norm(context)
         
         return context
 
@@ -59,13 +58,13 @@ class TemporalLSTMClassifier(nn.Module):
     
     def __init__(
         self,
-        input_dim: int = 640,
+        input_dim: int = 1152,
         hidden_dim: int = 512,
         num_layers: int = 2,
         num_classes: int = 2286,
         dropout: float = 0.3,
         bidirectional: bool = True,
-        use_attention: bool = False  # Add attention parameter
+        use_attention: bool = True  # Add attention parameter
     ):
         super().__init__()
         
@@ -75,7 +74,6 @@ class TemporalLSTMClassifier(nn.Module):
         self.bidirectional = bidirectional
         self.use_attention = use_attention  # Store attention flag
         
-        self.input_norm = nn.LayerNorm(input_dim)
 
         # LSTM bidireccional
         self.lstm = nn.LSTM(
@@ -89,7 +87,6 @@ class TemporalLSTMClassifier(nn.Module):
         
         # Dimensión después de LSTM
         lstm_output_dim = hidden_dim * 2 if bidirectional else hidden_dim
-        self.lstm_norm = nn.LayerNorm(lstm_output_dim)
 
         if use_attention:
             self.attention = AttentionModule(lstm_output_dim)
@@ -126,7 +123,6 @@ class TemporalLSTMClassifier(nn.Module):
             logits: (B, num_classes)
         """
         B, T, D = x.shape
-        x = self.input_norm(x)
         # LSTM forward
         if lengths is not None:
             # Pack padded sequence para eficiencia
@@ -138,7 +134,6 @@ class TemporalLSTMClassifier(nn.Module):
         else:
             lstm_out, (h_n, c_n) = self.lstm(x)  # (B, T, hidden_dim*2)
         
-        lstm_out = self.lstm_norm(lstm_out)
 
         if self.use_attention:
             # Use attention mechanism to get context vector

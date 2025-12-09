@@ -375,6 +375,7 @@ def main():
     num_workers = args.num_workers or config.training.num_workers
     train_split = args.train_split or config.data.train_split
     val_split = args.val_split or config.data.val_split
+    accuracy_thresholds = config.evaluation.accuracy_thresholds
     
     if not features_dir.exists():
         logger.error(f"Directorio de features no encontrado: {features_dir}")
@@ -428,7 +429,8 @@ def main():
             device=trainer.device,
             num_classes=trainer.num_classes,
             save_dir=checkpoint_dir / "evaluation_results",
-            history_path=checkpoint_dir / "training_history.json"
+            history_path=checkpoint_dir / "training_history.json",
+            accuracy_thresholds=accuracy_thresholds
         )
 
 

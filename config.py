@@ -170,7 +170,7 @@ class TrainingConfig:
     # Básico
     num_epochs: int = 150
     batch_size: int = 128
-    num_workers: int = 10
+    num_workers: int = 6
     pin_memory: bool = False
     
     # Optimización
@@ -224,6 +224,7 @@ class EvalConfig:
     compute_confusion_matrix: bool = True
     compute_per_class_metrics: bool = True
     top_k_accuracy: List[int] = None
+    accuracy_thresholds: List[float] = [0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
     
     def __post_init__(self):
         if self.top_k_accuracy is None:
@@ -232,7 +233,7 @@ class EvalConfig:
 @dataclass
 class OutputPaths:
     """Rutas para outputs y reportes"""
-    evaluation_report: Path = OUTPUTS_DIR / "evaluation_report.json"
+    evaluation_report: Path = OUTPUTS_DIR
     confusion_matrix: Path = OUTPUTS_DIR / "confusion_matrix.png"
     training_history: Path = OUTPUTS_DIR / "training_history.csv"
     tensorboard_logs: Path = LOGS_DIR / "tensorboard"

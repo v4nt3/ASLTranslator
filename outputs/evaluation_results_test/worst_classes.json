@@ -1,0 +1,177 @@
+[
+  {
+    "class_name": 1420,
+    "accuracy": 0.42857142857142855,
+    "num_samples": 7
+  },
+  {
+    "class_name": 1829,
+    "accuracy": 0.42857142857142855,
+    "num_samples": 7
+  },
+  {
+    "class_name": 516,
+    "accuracy": 0.5,
+    "num_samples": 10
+  },
+  {
+    "class_name": 866,
+    "accuracy": 0.5,
+    "num_samples": 6
+  },
+  {
+    "class_name": 1605,
+    "accuracy": 0.5384615384615384,
+    "num_samples": 13
+  },
+  {
+    "class_name": 997,
+    "accuracy": 0.5555555555555556,
+    "num_samples": 9
+  },
+  {
+    "class_name": 1592,
+    "accuracy": 0.5625,
+    "num_samples": 16
+  },
+  {
+    "class_name": 342,
+    "accuracy": 0.5714285714285714,
+    "num_samples": 7
+  },
+  {
+    "class_name": 1194,
+    "accuracy": 0.5714285714285714,
+    "num_samples": 7
+  },
+  {
+    "class_name": 982,
+    "accuracy": 0.6,
+    "num_samples": 5
+  },
+  {
+    "class_name": 988,
+    "accuracy": 0.6,
+    "num_samples": 5
+  },
+  {
+    "class_name": 1650,
+    "accuracy": 0.6,
+    "num_samples": 5
+  },
+  {
+    "class_name": 587,
+    "accuracy": 0.625,
+    "num_samples": 8
+  },
+  {
+    "class_name": 597,
+    "accuracy": 0.625,
+    "num_samples": 8
+  },
+  {
+    "class_name": 1196,
+    "accuracy": 0.625,
+    "num_samples": 8
+  },
+  {
+    "class_name": 1663,
+    "accuracy": 0.6363636363636364,
+    "num_samples": 11
+  },
+  {
+    "class_name": 1670,
+    "accuracy": 0.6363636363636364,
+    "num_samples": 11
+  },
+  {
+    "class_name": 1749,
+    "accuracy": 0.6363636363636364,
+    "num_samples": 11
+  },
+  {
+    "class_name": 1777,
+    "accuracy": 0.6363636363636364,
+    "num_samples": 11
+  },
+  {
+    "class_name": 1466,
+    "accuracy": 0.6521739130434783,
+    "num_samples": 23
+  },
+  {
+    "class_name": 80,
+    "accuracy": 0.6666666666666666,
+    "num_samples": 15
+  },
+  {
+    "class_name": 122,
+    "accuracy": 0.6666666666666666,
+    "num_samples": 6
+  },
+  {
+    "class_name": 337,
+    "accuracy": 0.6666666666666666,
+    "num_samples": 6
+  },
+  {
+    "class_name": 765,
+    "accuracy": 0.6666666666666666,
+    "num_samples": 9
+  },
+  {
+    "class_name": 1402,
+    "accuracy": 0.6666666666666666,
+    "num_samples": 9
+  },
+  {
+    "class_name": 1672,
+    "accuracy": 0.6666666666666666,
+    "num_samples": 6
+  },
+  {
+    "class_name": 1926,
+    "accuracy": 0.6666666666666666,
+    "num_samples": 9
+  },
+  {
+    "class_name": 1977,
+    "accuracy": 0.6666666666666666,
+    "num_samples": 9
+  },
+  {
+    "class_name": 2014,
+    "accuracy": 0.6666666666666666,
+    "num_samples": 12
+  },
+  {
+    "class_name": 2123,
+    "accuracy": 0.6666666666666666,
+    "num_samples": 6
+  },
+  {
+    "class_name": 1352,
+    "accuracy": 0.6842105263157895,
+    "num_samples": 19
+  },
+  {
+    "class_name": 1630,
+    "accuracy": 0.6875,
+    "num_samples": 16
+  },
+  {
+    "class_name": 1787,
+    "accuracy": 0.6875,
+    "num_samples": 16
+  },
+  {
+    "class_name": 77,
+    "accuracy": 0.6923076923076923,
+    "num_samples": 13
+  },
+  {
+    "class_name": 468,
+    "accuracy": 0.6923076923076923,
+    "num_samples": 13
+  }
+]
