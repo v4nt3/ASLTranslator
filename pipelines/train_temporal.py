@@ -123,7 +123,7 @@ class TemporalTrainer:
         )
         
         # Loss
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.CrossEntropyLoss(label_smoothing=0.15)
         
         # AMP
         self.scaler = GradScaler() if use_amp else None
