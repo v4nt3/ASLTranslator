@@ -21,46 +21,36 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class ResNet101FeatureExtractor(nn.Module):
-    """Extractor de features usando ResNet101 frozen"""
+def load_visual_extractor(extractor_path: Path, device: str):
+    """Carga el extractor visual guardado"""
     
-    def __init__(self, output_dim=1024):
-        super().__init__()
-        
-        # Cargar ResNet101 pretrained
-        resnet = models.resnet101(pretrained=True)
-        
-        # Remover la última capa FC para obtener features (2048 dims)
-        self.feature_extractor = nn.Sequential(*list(resnet.children())[:-1])
-        
-        # Projection a 1024 dims
-        self.projection = nn.Linear(2048, output_dim)
-        
-        # Freeze todo
-        for param in self.parameters():
-            param.requires_grad = False
-        
-        self.eval()
-        
-        logger.info(f"✓ ResNet101 feature extractor inicializado (frozen)")
+    if not extractor_path.exists():
+        raise FileNotFoundError(
+            f"Extractor no encontrado: {extractor_path}\n"
+            f"   Ejecuta primero: python scripts/save_extractors.py"
+        )
     
-    @torch.no_grad()
-    def forward(self, x):
-        """
-        Args:
-            x: (B, C, H, W) tensor de frames
-        Returns:
-            features: (B, 1024)
-        """
-        features = self.feature_extractor(x)  # (B, 2048, 1, 1)
-        features = features.squeeze(-1).squeeze(-1)  # (B, 2048)
-        features = self.projection(features)  # (B, 1024)
-        return features
-
+    logger.info(f"Cargando extractor visual desde: {extractor_path}")
+    
+    try:
+        # Intentar cargar modelo completo
+        extractor = torch.load(extractor_path, map_location=device)
+        logger.info("✓ Extractor cargado (modelo completo)")
+    except:
+        # Si falla, cargar state_dict
+        from pipelines.save_extractors import ResNet101FeatureExtractor
+        extractor = ResNet101FeatureExtractor(output_dim=1024)
+        extractor.load_state_dict(torch.load(extractor_path, map_location=device))
+        extractor.to(device)
+        logger.info("✓ Extractor cargado (state_dict)")
+    
+    extractor.eval()
+    return extractor
 
 def precompute_visual_features(
     clips_dir: Path = None,
     output_dir: Path = None,
+    extractor_path: Path = None,
     device: str = None,
     batch_size: int = 32
 ):
@@ -80,12 +70,14 @@ def precompute_visual_features(
         output_dir = config.data_paths.features_visual
     if device is None:
         device = config.training.device
+    if extractor_path is None:
+        extractor_path = Path("models/extractors/visual_extractor_full.pt")
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Inicializar modelo
     device = torch.device(device if torch.cuda.is_available() else "cpu")
-    model = ResNet101FeatureExtractor(output_dim=config.data.visual_feature_dim).to(device)
+    model = load_visual_extractor(extractor_path, device) 
     
     # Transform para normalizar frames
     transform = transforms.Compose([

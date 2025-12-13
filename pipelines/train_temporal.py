@@ -320,7 +320,6 @@ class TemporalTrainer:
         logger.info(f"   Checkpoints guardados en: {self.checkpoint_dir}")
         logger.info(f"{'='*60}\n")
 
-
 def main():
     parser = argparse.ArgumentParser(description="Entrenamiento de modelo temporal optimizado")
     

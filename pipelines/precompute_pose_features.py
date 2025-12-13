@@ -18,49 +18,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-class PoseFeatureExtractor(nn.Module):
-    """Extractor de features de pose con MLP frozen"""
+def load_pose_extractor(extractor_path: Path, device: str):
+    """Carga el extractor de pose guardado"""
     
-    def __init__(self, input_dim=None, hidden_dim=256, output_dim=None):
-        super().__init__()
-        
-        if input_dim is None:
-            input_dim = config.model.keypoints_dim
-        if output_dim is None:
-            output_dim = config.data.pose_feature_dim
-        
-        # MLP: 300 → 256 → 128
-        self.mlp = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(hidden_dim, output_dim),
-            nn.ReLU()
+    if not extractor_path.exists():
+        raise FileNotFoundError(
+            f"❌ Extractor no encontrado: {extractor_path}\n"
+            f"   Ejecuta primero: python scripts/save_extractors.py"
         )
-        
-        # Freeze todo
-        for param in self.parameters():
-            param.requires_grad = False
-        
-        self.eval()
-        
-        logger.info(f"✓ Pose MLP feature extractor inicializado (frozen)")
     
-    @torch.no_grad()
-    def forward(self, x):
-        """
-        Args:
-            x: (B, 300) tensor de keypoints
-        Returns:
-            features: (B, 128)
-        """
-        return self.mlp(x)
-
+    logger.info(f"Cargando extractor de pose desde: {extractor_path}")
+    
+    try:
+        extractor = torch.load(extractor_path, map_location=device)
+        logger.info("✓ Extractor cargado (modelo completo)")
+    except:
+        from pipelines.save_extractors import PoseFeatureExtractor
+        extractor = PoseFeatureExtractor()
+        extractor.load_state_dict(torch.load(extractor_path, map_location=device))
+        extractor.to(device)
+        logger.info("✓ Extractor cargado (state_dict)")
+    
+    extractor.eval()
+    return extractor
 
 def precompute_pose_features(
     clips_dir: Path = None,
     output_dir: Path = None,
+    extractor_path: Path = None,
     device: str = None,
     batch_size: int = 256
 ):
@@ -80,12 +65,14 @@ def precompute_pose_features(
         output_dir = config.data_paths.features_pose
     if device is None:
         device = config.training.device
+    if extractor_path is None:
+        extractor_path = Path("models/extractors/pose_extractor_full.pt")
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Inicializar modelo
+    # Cargar extractor guardado
     device = torch.device(device if torch.cuda.is_available() else "cpu")
-    model = PoseFeatureExtractor().to(device)
+    model = load_pose_extractor(extractor_path, device)
     
     # Buscar todos los archivos _keypoints.npy
     keypoints_files = sorted(clips_dir.glob("*_keypoints.npy"))
