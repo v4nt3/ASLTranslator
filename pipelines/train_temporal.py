@@ -59,7 +59,7 @@ def setup_logging(checkpoint_dir: Path):
 logger = logging.getLogger(__name__)
 
 class TemporalTrainer:
-    """Entrenador para modelos temporales con features precomputadas"""
+    """Entrenador para modelos temporales CORREGIDO"""
     
     def __init__(
         self,
@@ -71,7 +71,7 @@ class TemporalTrainer:
         device: str = None,
         use_amp: bool = None,
         checkpoint_dir: Path = None,
-        use_attention: bool = False  # Add attention parameter
+        use_attention: bool = False
     ):
         if num_classes is None:
             num_classes = config.model.num_classes
@@ -98,9 +98,14 @@ class TemporalTrainer:
         global logger
         logger = setup_logging(self.checkpoint_dir)
         
+        # CAMBIADO: Usar dropout de config
         self.model = get_temporal_model(
             model_type=model_type,
             num_classes=num_classes,
+            hidden_dim=config.training.model_hidden_dim,      # NUEVO
+            num_layers=config.training.model_num_layers,      # NUEVO
+            dropout=config.training.model_dropout,            # CAMBIADO
+            bidirectional=config.training.model_bidirectional,# NUEVO
             use_attention=use_attention
         ).to(self.device)
         
@@ -111,19 +116,30 @@ class TemporalTrainer:
             weight_decay=weight_decay
         )
         
+        # CAMBIADO: Scheduler según config
+        if config.training.scheduler_type == "plateau":
+            self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                self.optimizer, 
+                mode='min',
+                factor=config.training.scheduler_factor,      # 0.5
+                patience=config.training.scheduler_patience,   # 5
+                threshold=1e-4,
+                min_lr=config.training.scheduler_min_lr       # 1e-6
+            )
+            logger.info("Usando ReduceLROnPlateau scheduler")
+        elif config.training.scheduler_type == "onecycle":
+            # OneCycle requiere conocer total_steps
+            # Se configura más adelante en train()
+            self.scheduler = None
+            logger.info("OneCycle scheduler se configurará en train()")
+        else:
+            self.scheduler = None
+            logger.info("Sin scheduler")
         
-        # Scheduler
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, 
-            mode='min',
-            factor=0.3,
-            patience=5,
-            threshold=1e-4,
-            min_lr=1e-6
+        # Loss - CAMBIADO: usar label_smoothing de config
+        self.criterion = nn.CrossEntropyLoss(
+            label_smoothing=config.training.label_smoothing  # Ahora 0.0
         )
-        
-        # Loss
-        self.criterion = nn.CrossEntropyLoss(label_smoothing=0.15)
         
         # AMP
         self.scaler = GradScaler() if use_amp else None
@@ -144,11 +160,99 @@ class TemporalTrainer:
         logger.info(f"   Device: {self.device}")
         logger.info(f"   Model type: {model_type}")
         logger.info(f"   Num classes: {num_classes}")
-        logger.info(f"   Use attention: {use_attention}")  # Log attention
+        logger.info(f"   Learning rate: {learning_rate}")
+        logger.info(f"   Weight decay: {weight_decay}")
+        logger.info(f"   Label smoothing: {config.training.label_smoothing}")  # NUEVO
+        logger.info(f"   Dropout: {config.training.model_dropout}")            # NUEVO
+        logger.info(f"   Use attention: {use_attention}")
         logger.info(f"   Use AMP: {use_amp}")
     
+    def train(self, train_loader, val_loader):
+        """Loop de entrenamiento CORREGIDO"""
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Iniciando entrenamiento por {self.num_epochs} epochs")
+        logger.info(f"{'='*60}\n")
+        
+        # Configurar OneCycle si es necesario
+        if config.training.scheduler_type == "onecycle":
+            total_steps = len(train_loader) * self.num_epochs
+            self.scheduler = optim.lr_scheduler.OneCycleLR(
+                self.optimizer,
+                max_lr=config.training.learning_rate,
+                total_steps=total_steps,
+                pct_start=config.training.pct_start,
+                div_factor=config.training.lr_div_factor,
+                final_div_factor=1e4
+            )
+            logger.info(f"OneCycle scheduler configurado: {total_steps} steps")
+        
+        patience_counter = 0
+        for epoch in range(self.num_epochs):
+            logger.info(f"\nEpoch {epoch + 1}/{self.num_epochs}")
+            
+            train_loss, train_acc, train_top5 = self.train_epoch(train_loader)
+            val_loss, val_accuracy, val_top5 = self.validate(val_loader)
+            
+            # CAMBIADO: Scheduler step según tipo
+            if config.training.scheduler_type == "plateau":
+                self.scheduler.step(val_loss)
+            # OneCycle se actualiza en cada batch (dentro de train_epoch)
+            
+            self.history['train_loss'].append(train_loss)
+            self.history['train_accuracy'].append(train_acc)
+            self.history['train_top5_accuracy'].append(train_top5)
+            self.history['val_loss'].append(val_loss)
+            self.history['val_accuracy'].append(val_accuracy)
+            self.history['val_top5_accuracy'].append(val_top5)
+            self.history['learning_rate'].append(self.optimizer.param_groups[0]['lr'])
+            
+            logger.info(f"  Early Stopping Patience: {patience_counter}/{config.training.early_stopping_patience}")
+            logger.info(f"   Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Train Top-5: {train_top5:.4f}")
+            logger.info(f"   Val Loss: {val_loss:.4f} | Val Acc: {val_accuracy:.4f} | Val Top-5: {val_top5:.4f}")
+            logger.info(f"   LR: {self.optimizer.param_groups[0]['lr']:.6f}")
+            
+            # Save best model
+            if val_accuracy > self.best_val_acc:
+                self.best_val_acc = val_accuracy
+                best_path = self.checkpoint_dir / "best_model.pt"
+                torch.save(self.model.state_dict(), best_path)
+                logger.info(f"   ★ Best model saved! Accuracy: {val_accuracy:.4f}")
+                patience_counter = 0
+            else:
+                patience_counter += 1
+            
+            # Save checkpoint every 15 epochs
+            if (epoch + 1) % 15 == 0:
+                checkpoint_path = self.checkpoint_dir / f"checkpoint_epoch_{epoch+1}.pt"
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': self.model.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
+                    'val_accuracy': val_accuracy,
+                }, checkpoint_path)
+        
+            if patience_counter >= config.training.early_stopping_patience:
+                logger.info(f"Early stopping activado. No hay mejora en {config.training.early_stopping_patience} epochs.")
+                logger.info(f"Mejor Val Accuracy: {self.best_val_acc:.4f}")
+                break
+        
+        # Save final model
+        final_path = self.checkpoint_dir / "final_model.pt"
+        torch.save(self.model.state_dict(), final_path)
+        
+        # Save history
+        history_path = self.checkpoint_dir / "training_history.json"
+        with open(history_path, 'w') as f:
+            json.dump(self.history, f, indent=2)
+        
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Entrenamiento completado!")
+        logger.info(f"   Best Val Accuracy: {self.best_val_acc:.4f}")
+        logger.info(f"   Checkpoints guardados en: {self.checkpoint_dir}")
+        logger.info(f"{'='*60}\n")
+    
     def train_epoch(self, train_loader) -> Tuple[float, float, float]:
-        """Entrena una epoca y retorna loss, accuracy y top5_accuracy"""
+        """Entrena una epoca CORREGIDO"""
         self.model.train()
         total_loss = 0.0
         all_preds = []
@@ -182,10 +286,14 @@ class TemporalTrainer:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                     self.optimizer.step()
                 
+                # NUEVO: OneCycle step después de cada batch
+                if config.training.scheduler_type == "onecycle" and self.scheduler:
+                    self.scheduler.step()
+                
                 total_loss += loss.item()
                 num_batches += 1
                 
-                # Guardar predicciones para calcular accuracy
+                # Guardar predicciones
                 preds = torch.argmax(logits, dim=1)
                 all_preds.append(preds.cpu().numpy())
                 all_targets.append(targets.cpu().numpy())
@@ -193,7 +301,7 @@ class TemporalTrainer:
                 
                 pbar.set_postfix({'loss': f'{loss.item():.4f}'})
         
-        # Calcular métricas de entrenamiento
+        # Calcular métricas
         avg_loss = total_loss / num_batches
         all_preds = np.concatenate(all_preds)
         all_targets = np.concatenate(all_targets)
