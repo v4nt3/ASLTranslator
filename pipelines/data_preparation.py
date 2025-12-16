@@ -20,7 +20,7 @@ import pandas as pd
 import json
 
 from config import config
-from data_preparation import (
+from pipelines.data_preparation1 import (
     FrameExtractor, 
     KeypointExtractor, 
     ActionSegmenter
