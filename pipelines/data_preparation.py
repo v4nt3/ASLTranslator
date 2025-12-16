@@ -1,11 +1,13 @@
 """
-Pipeline SIMPLE Y RÁPIDO
-Sin problemas de serialización, mantiene lógica original
+Pipeline NUEVO: Sin creación de clips
+Trabaja directamente con secuencias completas de longitud variable
 
-ESTRATEGIA:
-- Paralelización a nivel de LOTES (no de workers individuales)
-- Usa ThreadPoolExecutor en vez de ProcessPoolExecutor (evita serialización)
-- Procesa múltiples videos simultáneamente con threading
+FLUJO:
+1. Video → Frames (TODOS o subsampling inteligente)
+2. Frames → Keypoints (TODOS)
+3. Detectar región de la seña (ActionSegmenter)
+4. Extraer features visuales y pose de la región completa
+5. Entrenar LSTM con secuencias de longitud variable
 """
 
 import numpy as np
@@ -14,171 +16,155 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import logging
 from tqdm import tqdm
+import pandas as pd
 import json
-import time
-from concurrent.futures import ThreadPoolExecutor
-import cv2
-import mediapipe as mp
 
 from config import config
+from data_preparation import (
+    FrameExtractor, 
+    KeypointExtractor, 
+    ActionSegmenter
+)
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# ============================================================
-# PROCESADOR SIMPLE CON THREADING
-# ============================================================
-
-class SimpleSequenceProcessor:
+class SequenceProcessor:
     """
-    Procesador que usa threading (evita problemas de serialización)
-    y agrupa procesamiento en batches
+    Procesa videos completos sin crear clips
+    Mantiene la secuencia temporal completa
     """
     
-    def __init__(self, config, max_frames: int = 120, num_threads: int = 8):
+    def __init__(self, config, max_frames: int = 120):
         self.config = config
-        self.max_frames = max_frames
-        self.num_threads = num_threads
+        self.max_frames = max_frames  # Límite para evitar OOM
+        
+        self.frame_extractor = FrameExtractor(config)
+        self.keypoint_extractor = KeypointExtractor(config)
+        self.action_segmenter = ActionSegmenter(config, debug=True)
         
         logger.info("="*60)
-        logger.info("SimpleSequenceProcessor")
-        logger.info(f"  Max frames: {max_frames}")
-        logger.info(f"  Threads: {num_threads}")
+        logger.info("SequenceProcessor: Sin clips, secuencias completas")
+        logger.info(f"  Max frames por secuencia: {max_frames}")
         logger.info("="*60)
     
-    def extract_frames_from_video(self, video_path: Path) -> Optional[np.ndarray]:
-        """Extrae frames de UN video"""
-        try:
-            cap = cv2.VideoCapture(str(video_path))
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            
-            if total_frames == 0:
-                cap.release()
-                return None
-            
-            # Submuestrear si es necesario
-            if total_frames > self.max_frames:
-                indices = np.linspace(0, total_frames - 1, self.max_frames, dtype=int)
-            else:
-                indices = np.arange(total_frames)
-            
-            frames = []
-            for idx in indices:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
-                ret, frame = cap.read()
-                if ret:
-                    frame = cv2.resize(frame, (224, 224))
-                    frames.append(frame)
-            
-            cap.release()
-            
-            if len(frames) == 0:
-                return None
-            
-            return np.array(frames, dtype=np.uint8)
-            
-        except Exception as e:
-            logger.error(f"Error extrayendo frames de {video_path.name}: {e}")
-            return None
-    
-    def extract_keypoints_from_frames(self, frames: np.ndarray) -> Optional[np.ndarray]:
-        """Extrae keypoints de frames usando MediaPipe"""
-        try:
-            # Inicializar MediaPipe
-            mp_pose = mp.solutions.pose
-            mp_hands = mp.solutions.hands
-            
-            pose = mp_pose.Pose(
-                static_image_mode=False,
-                model_complexity=1,
-                smooth_landmarks=True,
-                min_detection_confidence=0.5
-            )
-            
-            hands = mp_hands.Hands(
-                static_image_mode=False,
-                max_num_hands=2,
-                min_detection_confidence=0.5
-            )
-            
-            keypoints_sequence = []
-            
-            for frame in frames:
-                # Extraer pose
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                pose_results = pose.process(frame_rgb)
-                
-                pose_kpts = np.zeros((33, 4), dtype=np.float32)
-                if pose_results.pose_landmarks:
-                    for i, lm in enumerate(pose_results.pose_landmarks.landmark):
-                        pose_kpts[i] = [lm.x, lm.y, lm.z, lm.visibility]
-                
-                # Normalizar pose (IGUAL que data_preparation.py)
-                left_hip = pose_kpts[23][:3]
-                right_hip = pose_kpts[24][:3]
-                center = (left_hip + right_hip) / 2
-                
-                left_shoulder = pose_kpts[11][:3]
-                right_shoulder = pose_kpts[12][:3]
-                shoulder_dist = np.linalg.norm(left_shoulder - right_shoulder)
-                scale = max(shoulder_dist, 0.1)
-                
-                pose_kpts[:, :3] = (pose_kpts[:, :3] - center) / scale
-                pose_kpts[:, :3] = np.clip(pose_kpts[:, :3], -1, 1)
-                
-                # Extraer manos
-                hands_results = hands.process(frame_rgb)
-                hand_kpts = np.zeros((42, 4), dtype=np.float32)
-                
-                if hands_results.multi_hand_landmarks:
-                    for hand_idx, hand_landmarks in enumerate(hands_results.multi_hand_landmarks[:2]):
-                        start_idx = hand_idx * 21
-                        for i, lm in enumerate(hand_landmarks.landmark):
-                            hand_kpts[start_idx + i] = [lm.x, lm.y, lm.z, 1.0]
-                
-                # Combinar
-                combined = np.concatenate([pose_kpts, hand_kpts], axis=0)
-                keypoints_sequence.append(combined)
-            
-            pose.close()
-            hands.close()
-            
-            if len(keypoints_sequence) == 0:
-                return None
-            
-            return np.array(keypoints_sequence, dtype=np.float32)
-            
-        except Exception as e:
-            logger.error(f"Error extrayendo keypoints: {e}")
-            return None
-    
-    def process_single_video(self, video_path: Path, class_id: int) -> Optional[Dict]:
-        """Procesa UN video completo (frames + keypoints)"""
+    def process_single_video(
+        self, 
+        video_path: Path,
+        class_id: int
+    ) -> Optional[Dict]:
+        """
+        Procesa UN video completo
+        
+        Returns:
+            {
+                'video_name': str,
+                'class_id': int,
+                'frames': np.ndarray,  # (T, H, W, C)
+                'keypoints': np.ndarray,  # (T, 75, 4)
+                'sequence_length': int,
+                'segmented': bool,
+                'segment_bounds': (start, end)
+            }
+        """
         video_name = video_path.stem
         
-        # Extraer frames
-        frames = self.extract_frames_from_video(video_path)
-        if frames is None:
+        try:
+            # 1. Extraer frames
+            frames = self.frame_extractor.extract_frames(
+                video_path, 
+                self.config.data_paths.extracted_frames
+            )
+            
+            if len(frames) == 0:
+                logger.warning(f"[{video_name}] No frames extraídos")
+                return None
+            
+            frames = np.array(frames)
+            
+            # 2. Extraer keypoints
+            keypoints_sequence = []
+            for frame in frames:
+                pose_kpts = self.keypoint_extractor.extract_pose_keypoints(frame)
+                
+                if pose_kpts is not None:
+                    pose_kpts = self.keypoint_extractor.normalize_keypoints(pose_kpts)
+                    hand_kpts = self.keypoint_extractor.extract_hand_keypoints(frame)
+                    
+                    if hand_kpts is not None:
+                        combined_kpts = np.concatenate([pose_kpts, hand_kpts], axis=0)
+                    else:
+                        hand_placeholder = np.zeros((42, 4))
+                        combined_kpts = np.concatenate([pose_kpts, hand_placeholder], axis=0)
+                    
+                    keypoints_sequence.append(combined_kpts)
+            
+            if len(keypoints_sequence) == 0:
+                logger.warning(f"[{video_name}] No keypoints extraídos")
+                return None
+            
+            keypoints = np.array(keypoints_sequence)
+            
+            # 3. Segmentar acción (encontrar región relevante)
+            try:
+                seg_start, seg_end = self.action_segmenter.segment_action(keypoints)
+                
+                # Validar segmento
+                segment_length = seg_end - seg_start
+                total_length = len(keypoints)
+                
+                # Si segmento muy corto, expandir
+                if segment_length < total_length * 0.3:
+                    expand = int((total_length * 0.5 - segment_length) / 2)
+                    seg_start = max(0, seg_start - expand)
+                    seg_end = min(total_length, seg_end + expand)
+                    logger.debug(f"[{video_name}] Segmento expandido: [{seg_start}, {seg_end}]")
+                
+                # Recortar a región segmentada
+                frames = frames[seg_start:seg_end]
+                keypoints = keypoints[seg_start:seg_end]
+                segmented = True
+                
+            except Exception as e:
+                logger.warning(f"[{video_name}] Error en segmentación: {e}, usando completo")
+                seg_start, seg_end = 0, len(keypoints)
+                segmented = False
+            
+            # 4. Submuestrear si es muy largo
+            sequence_length = len(frames)
+            
+            if sequence_length > self.max_frames:
+                # Submuestrear uniformemente
+                indices = np.linspace(0, sequence_length - 1, self.max_frames, dtype=int)
+                frames = frames[indices]
+                keypoints = keypoints[indices]
+                sequence_length = self.max_frames
+                logger.debug(f"[{video_name}] Submuestreado: {sequence_length} → {self.max_frames}")
+            
+            # 5. Retornar datos
+            return {
+                'video_name': video_name,
+                'class_id': class_id,
+                'frames': frames.astype(np.uint8),
+                'keypoints': keypoints.astype(np.float32),
+                'sequence_length': sequence_length,
+                'segmented': segmented,
+                'segment_bounds': (seg_start, seg_end)
+            }
+            
+        except Exception as e:
+            logger.error(f"[{video_name}] Error procesando: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
-        
-        # Extraer keypoints
-        keypoints = self.extract_keypoints_from_frames(frames)
-        if keypoints is None:
-            return None
-        
-        return {
-            'video_name': video_name,
-            'class_id': class_id,
-            'frames': frames,
-            'keypoints': keypoints,
-            'sequence_length': len(frames)
-        }
     
     def process_all_videos(self) -> List[Dict]:
         """
-        Procesa todos los videos usando ThreadPoolExecutor
-        (evita problemas de serialización de ProcessPoolExecutor)
+        Procesa todos los videos del dataset
+        
+        Returns:
+            Lista de diccionarios con información de cada secuencia
         """
         video_dir = self.config.data_paths.raw_videos
         metadata_path = video_dir / "dataset_meta.json"
@@ -187,7 +173,9 @@ class SimpleSequenceProcessor:
         with open(metadata_path, 'r') as f:
             metadata = json.load(f)
         
+        # Extraer mapeo video → class_id
         video_to_class = {}
+        
         if isinstance(metadata, dict):
             if 'videos' in metadata:
                 for entry in metadata['videos']:
@@ -196,232 +184,279 @@ class SimpleSequenceProcessor:
                     if video_file and class_id is not None:
                         video_to_class[video_file] = int(class_id)
         
+        logger.info(f"Metadata cargada: {len(video_to_class)} videos")
+        
         # Buscar videos
         video_files = list(video_dir.glob("**/*.mp4")) + list(video_dir.glob("**/*.avi"))
         logger.info(f"Videos encontrados: {len(video_files)}")
         
-        # Mapear videos a class_id
-        video_class_pairs = []
-        for video_path in video_files:
-            class_id = None
-            for key, cid in video_to_class.items():
-                if video_path.name in key or video_path.stem in key.replace('.mp4', '').replace('.avi', ''):
-                    class_id = cid
-                    break
-            
-            if class_id is not None:
-                video_class_pairs.append((video_path, class_id))
-        
-        logger.info(f"Videos con class_id válido: {len(video_class_pairs)}")
-        
-        # Procesar con ThreadPoolExecutor
+        # Procesar cada video
         sequences = []
+        processed = 0
+        skipped = 0
         
-        with ThreadPoolExecutor(max_workers=self.num_threads) as executor:
-            futures = [
-                executor.submit(self.process_single_video, video_path, class_id)
-                for video_path, class_id in video_class_pairs
-            ]
+        for video_path in tqdm(video_files, desc="Procesando videos"):
+            # Buscar class_id
+            video_file = video_path.name
+            class_id = video_to_class.get(video_file)
             
-            for future in tqdm(futures, desc="Procesando videos"):
-                result = future.result()
-                if result is not None:
-                    sequences.append(result)
+            if class_id is None:
+                # Intentar match parcial
+                for key, cid in video_to_class.items():
+                    if video_path.stem in key or key in video_path.stem:
+                        class_id = cid
+                        break
+            
+            if class_id is None:
+                logger.warning(f"No class_id para: {video_file}")
+                skipped += 1
+                continue
+            
+            # Procesar
+            result = self.process_single_video(video_path, class_id)
+            
+            if result is not None:
+                sequences.append(result)
+                processed += 1
         
-        logger.info(f"✅ Videos procesados exitosamente: {len(sequences)}")
+        logger.info("="*60)
+        logger.info(f"Videos procesados: {processed}")
+        logger.info(f"⊘ Videos saltados: {skipped}")
+        logger.info("="*60)
         
         return sequences
     
     def save_sequences(self, sequences: List[Dict], output_dir: Path):
-        """Guarda secuencias"""
+        """
+        Guarda secuencias procesadas
+        
+        Formato:
+        - sequences/
+          - {video_name}_frames.npy  (T, H, W, C)
+          - {video_name}_keypoints.npy  (T, 75, 4)
+        - sequences_metadata.json
+        """
         output_dir.mkdir(parents=True, exist_ok=True)
         
         metadata_list = []
         
-        for seq in tqdm(sequences, desc="Guardando"):
+        for seq in tqdm(sequences, desc="Guardando secuencias"):
             video_name = seq['video_name']
             
+            # Guardar frames
             frames_path = output_dir / f"{video_name}_frames.npy"
-            keypoints_path = output_dir / f"{video_name}_keypoints.npy"
-            
             np.save(frames_path, seq['frames'])
+            
+            # Guardar keypoints
+            keypoints_path = output_dir / f"{video_name}_keypoints.npy"
             np.save(keypoints_path, seq['keypoints'])
             
+            # Metadata
             metadata_list.append({
                 'video_name': video_name,
                 'class_id': seq['class_id'],
                 'sequence_length': seq['sequence_length'],
                 'frames_path': str(frames_path.name),
-                'keypoints_path': str(keypoints_path.name)
+                'keypoints_path': str(keypoints_path.name),
+                'segmented': seq['segmented'],
+                'segment_bounds': seq['segment_bounds']
             })
         
+        # Guardar metadata
         metadata_path = output_dir / "sequences_metadata.json"
         with open(metadata_path, 'w') as f:
             json.dump(metadata_list, f, indent=2)
         
-        logger.info(f"✅ Guardado: {output_dir}")
+        logger.info(f"Secuencias guardadas en: {output_dir}")
+        logger.info(f"   Metadata: {metadata_path}")
+        
+        # Estadísticas
+        lengths = [s['sequence_length'] for s in sequences]
+        logger.info(f"\nEstadísticas de longitud:")
+        logger.info(f"  Min: {min(lengths)}")
+        logger.info(f"  Max: {max(lengths)}")
+        logger.info(f"  Mean: {np.mean(lengths):.1f}")
+        logger.info(f"  Median: {np.median(lengths):.1f}")
 
 
-# ============================================================
-# GPU FEATURE EXTRACTOR
-# ============================================================
-
-class GPUFeatureExtractor:
-    """Extractor GPU optimizado"""
+class FeatureExtractorVariableLength:
+    """
+    Extrae features de secuencias de longitud variable
+    """
     
     def __init__(
-        self,
+        self, 
         sequences_dir: Path,
         visual_extractor_path: Path,
         pose_extractor_path: Path,
-        device: str = "cuda",
-        batch_size: int = 64
+        device: str = "cuda"
     ):
         self.sequences_dir = sequences_dir
-        self.device = torch.device(device)
-        self.batch_size = batch_size
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         
-        logger.info(f"Cargando extractors en {device}...")
-        
-        self.visual_extractor = torch.load(visual_extractor_path, map_location=self.device, weights_only=False)
+        # Cargar extractores
+        self.visual_extractor = torch.load(
+            visual_extractor_path, 
+            map_location=self.device,
+            weights_only=False
+        )
         self.visual_extractor.eval()
         
-        self.pose_extractor = torch.load(pose_extractor_path, map_location=self.device, weights_only=False)
+        self.pose_extractor = torch.load(
+            pose_extractor_path,
+            map_location=self.device,
+            weights_only=False
+        )
         self.pose_extractor.eval()
         
+        # Transform
         from torchvision import transforms
         self.transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
         
-        logger.info("✅ Extractors cargados")
+        logger.info("Feature extractors cargados")
     
     @torch.no_grad()
-    def extract_features(self, frames: np.ndarray, keypoints: np.ndarray) -> np.ndarray:
-        """Extrae features de una secuencia"""
+    def extract_features_from_sequence(
+        self,
+        frames: np.ndarray,
+        keypoints: np.ndarray,
+        batch_size: int = 32
+    ) -> np.ndarray:
+        """
+        Extrae features de una secuencia completa
+        
+        Args:
+            frames: (T, H, W, C)
+            keypoints: (T, 75, 4)
+            batch_size: Batch size para procesamiento
+        
+        Returns:
+            fused_features: (T, 1152) = visual(1024) + pose(128)
+        """
         T = len(frames)
         
-        # Visual features
+        # Extraer visual features
         all_visual = []
-        for i in range(0, T, self.batch_size):
-            batch_frames = frames[i:i+self.batch_size]
-            batch_tensors = []
+        for i in range(0, T, batch_size):
+            batch_frames = frames[i:i+batch_size]
             
+            # Convertir a tensor
+            batch_tensors = []
             for frame in batch_frames:
                 if frame.max() <= 1.0:
                     frame = (frame * 255).astype(np.uint8)
-                batch_tensors.append(self.transform(frame))
+                frame_tensor = self.transform(frame)
+                batch_tensors.append(frame_tensor)
             
             batch_tensor = torch.stack(batch_tensors).to(self.device)
+            
+            # Extraer
             visual_feat = self.visual_extractor(batch_tensor)
             all_visual.append(visual_feat.cpu().numpy())
         
-        visual_features = np.concatenate(all_visual, axis=0)
+        visual_features = np.concatenate(all_visual, axis=0)  # (T, 1024)
         
-        # Pose features
+        # Extraer pose features
         all_pose = []
-        for i in range(0, T, self.batch_size):
-            batch_keypoints = keypoints[i:i+self.batch_size]
+        for i in range(0, T, batch_size):
+            batch_keypoints = keypoints[i:i+batch_size]
+            
+            # Flatten
             batch_flat = batch_keypoints.reshape(len(batch_keypoints), -1)
             batch_tensor = torch.from_numpy(batch_flat).float().to(self.device)
+            
+            # Extraer
             pose_feat = self.pose_extractor(batch_tensor)
             all_pose.append(pose_feat.cpu().numpy())
         
-        pose_features = np.concatenate(all_pose, axis=0)
+        pose_features = np.concatenate(all_pose, axis=0)  # (T, 128)
         
         # Fusionar
-        fused = np.concatenate([visual_features, pose_features], axis=1)
-        return fused.astype(np.float16)
+        fused_features = np.concatenate([visual_features, pose_features], axis=1)  # (T, 1152)
+        
+        return fused_features.astype(np.float16)
     
     def process_all_sequences(self, output_dir: Path):
-        """Procesa todas las secuencias"""
+        """
+        Procesa todas las secuencias y guarda features
+        """
         output_dir.mkdir(parents=True, exist_ok=True)
         
+        # Cargar metadata
         metadata_path = self.sequences_dir / "sequences_metadata.json"
         with open(metadata_path, 'r') as f:
             metadata = json.load(f)
         
-        logger.info(f"Extrayendo features de {len(metadata)} secuencias...")
+        logger.info(f"Procesando {len(metadata)} secuencias...")
         
         processed = 0
-        for entry in tqdm(metadata, desc="GPU features"):
+        for entry in tqdm(metadata, desc="Extrayendo features"):
             video_name = entry['video_name']
+            
+            # Paths
+            frames_path = self.sequences_dir / entry['frames_path']
+            keypoints_path = self.sequences_dir / entry['keypoints_path']
             output_path = output_dir / f"{video_name}_fused.npy"
             
+            # Skip si ya existe
             if output_path.exists():
                 continue
             
             try:
-                frames = np.load(self.sequences_dir / entry['frames_path'])
-                keypoints = np.load(self.sequences_dir / entry['keypoints_path'])
+                # Cargar
+                frames = np.load(frames_path)
+                keypoints = np.load(keypoints_path)
                 
-                fused = self.extract_features(frames, keypoints)
-                np.save(output_path, fused)
+                # Extraer features
+                fused_features = self.extract_features_from_sequence(frames, keypoints)
+                
+                # Guardar
+                np.save(output_path, fused_features)
                 
                 processed += 1
+                
             except Exception as e:
-                logger.error(f"Error {video_name}: {e}")
+                logger.error(f"Error en {video_name}: {e}")
         
-        logger.info(f"✅ Features: {processed} secuencias")
+        logger.info(f"Features extraídas: {processed}")
 
-
-# ============================================================
-# PIPELINE PRINCIPAL
-# ============================================================
 
 def main():
-    """Pipeline simple y rápido"""
+    """Pipeline completo sin clips"""
     
-    total_start = time.time()
-    
-    # ========================================
-    # PASO 1: Procesar videos
-    # ========================================
+    # 1. Procesar videos a secuencias
     logger.info("\n" + "="*60)
-    logger.info("PASO 1: Procesamiento (Threading)")
+    logger.info("PASO 1: Procesar videos a secuencias")
     logger.info("="*60)
     
-    processor = SimpleSequenceProcessor(
-        config,
-        max_frames=120,
-        num_threads=8  # Threads para I/O bound (MediaPipe)
-    )
-    
+    processor = SequenceProcessor(config, max_frames=120)
     sequences = processor.process_all_videos()
     
     sequences_dir = Path("data/sequences")
     processor.save_sequences(sequences, sequences_dir)
     
-    # ========================================
-    # PASO 2: Features
-    # ========================================
+    # 2. Extraer features
     logger.info("\n" + "="*60)
-    logger.info("PASO 2: Features (GPU)")
+    logger.info("PASO 2: Extraer features de secuencias")
     logger.info("="*60)
     
-    feature_extractor = GPUFeatureExtractor(
+    feature_extractor = FeatureExtractorVariableLength(
         sequences_dir=sequences_dir,
         visual_extractor_path=Path("models/extractors/visual_extractor_full.pt"),
         pose_extractor_path=Path("models/extractors/pose_extractor_full.pt"),
-        device="cuda",
-        batch_size=64
+        device="cuda"
     )
     
     features_dir = Path("data/sequence_features")
     feature_extractor.process_all_sequences(features_dir)
     
-    # ========================================
-    # RESUMEN
-    # ========================================
-    total_time = time.time() - total_start
-    
     logger.info("\n" + "="*60)
-    logger.info("✅ COMPLETADO")
-    logger.info("="*60)
-    logger.info(f"  Tiempo: {total_time:.1f}s ({total_time/60:.1f} min)")
-    logger.info(f"  Videos: {len(sequences)}")
-    logger.info(f"  Velocidad: {len(sequences)/(total_time/60):.1f} videos/min")
+    logger.info("Pipeline completado!")
+    logger.info(f"   Secuencias: {sequences_dir}")
+    logger.info(f"   Features: {features_dir}")
     logger.info("="*60)
 
 
