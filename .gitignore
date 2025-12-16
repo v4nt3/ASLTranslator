@@ -47,6 +47,7 @@ models/
 # ───────────────────────────────
 data/features_fused
 dataset/
+testing/
 *.csv
 *.tsv
 *.zip

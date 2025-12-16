@@ -6,7 +6,6 @@ Solo entrena LSTM + Classifier (sin backbones visuales)
 import torch #type: ignore
 import torch.nn as nn  #type: ignore
 import logging
-import numpy as np
 
 logger = logging.getLogger(__name__)
 

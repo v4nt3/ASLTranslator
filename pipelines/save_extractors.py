@@ -3,10 +3,10 @@ Script para crear y guardar extractores de features
 EJECUTAR ESTE SCRIPT PRIMERO, ANTES DE TODO
 """
 
-import torch
-import torch.nn as nn
+import torch #type: ignore
+import torch.nn as nn #type: ignore
 from pathlib import Path
-from torchvision import models
+from torchvision import models #type: ignore
 import logging
 
 logging.basicConfig(level=logging.INFO)

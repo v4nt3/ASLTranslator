@@ -3,11 +3,10 @@ Script para precomputar features de pose usando MLP frozen
 Convierte keypoints (T, 300) → (T, 128) en float16
 """
 
-import torch
-import torch.nn as nn
-import numpy as np
+import torch #type: ignore
+import numpy as np #type: ignore
 from pathlib import Path
-from tqdm import tqdm
+from tqdm import tqdm #type: ignore
 import logging
 
 from config import config
@@ -23,7 +22,7 @@ def load_pose_extractor(extractor_path: Path, device: str):
     
     if not extractor_path.exists():
         raise FileNotFoundError(
-            f"❌ Extractor no encontrado: {extractor_path}\n"
+            f"Extractor no encontrado: {extractor_path}\n"
             f"   Ejecuta primero: python scripts/save_extractors.py"
         )
     

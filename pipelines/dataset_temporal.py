@@ -4,7 +4,7 @@ Carga directamente desde carpeta sin necesidad de CSV
 """
 
 import torch #type: ignore
-import numpy as np
+import numpy as np #type: ignore
 from torch.utils.data import Dataset, DataLoader #type: ignore
 from pathlib import Path
 from typing import Tuple, List

@@ -4,21 +4,21 @@ Genera matrices de confusión, curvas ROC, análisis de peores clases, etc.
 INCLUYE: Métricas detalladas por clase con filtrado por umbral de accuracy
 """
 
-import torch
-import numpy as np
+import torch #type: ignore
+import numpy as np #type: ignore
 from pathlib import Path
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.metrics import (
+import matplotlib.pyplot as plt #type: ignore
+import seaborn as sns #type: ignore
+from sklearn.metrics import ( #type: ignore
     confusion_matrix, classification_report, roc_curve, auc,
     precision_recall_curve, f1_score, top_k_accuracy_score,
     precision_score, recall_score
 )
-from sklearn.preprocessing import label_binarize
+from sklearn.preprocessing import label_binarize #type: ignore
 import json
-import pandas as pd
+import pandas as pd #type: ignore
 from typing import Dict, List, Tuple
-from tqdm import tqdm
+from tqdm import tqdm #type: ignore
 
 import logging
 

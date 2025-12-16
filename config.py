@@ -28,17 +28,14 @@ class DataPaths:
     raw_videos: Path = DATA_ROOT / "dataset"
     extracted_frames: Path = DATA_ROOT / "extracted_frames"
     keypoints: Path = DATA_ROOT / "keypoints"
-    clips: Path = DATA_ROOT / "clips"
     features_visual: Path = DATA_ROOT / "features_visual"
     features_pose: Path = DATA_ROOT / "features_pose"
     features_fused: Path = DATA_ROOT / "features_fused"
-    dataset_csv: Path = DATA_ROOT / "dataset.csv"
-    dataset_split_csv: Path = DATA_ROOT / "dataset_split.csv"
     dataset_meta: Path = DATA_ROOT / "dataset_metadata.json"  # Agregando ruta a dataset_meta.json para carga directa sin CSV
     
     def __post_init__(self):
         for path in [
-            self.raw_videos, self.extracted_frames, self.keypoints, self.clips,
+            self.raw_videos, self.extracted_frames, self.keypoints,
             self.features_visual, self.features_pose, self.features_fused
         ]:
             path.mkdir(parents=True, exist_ok=True)
@@ -47,10 +44,7 @@ class DataPaths:
 @dataclass
 class ModelPaths:
     """Rutas para modelos y checkpoints"""
-    best_macro: Path = CHECKPOINTS_DIR / "best_macro.pt"
-    last_checkpoint: Path = CHECKPOINTS_DIR / "last.pt"
     final_model: Path = MODELS_DIR / "final_model.pt"
-    onnx_model: Path = MODELS_DIR / "model.onnx"
     temporal_checkpoints: Path = CHECKPOINTS_DIR / "temporal"
     
     def __post_init__(self):
@@ -110,24 +104,13 @@ class DataConfig:
     visual_feature_dim: int = 512
     pose_feature_dim: int = 128
     fused_feature_dim: int = 640  # 512 + 128
-    
-    def __post_init__(self):
-        if self.clips_distribution is None:
-            self.clips_distribution = {
-                "low": 3,      # <=27 videos
-                "medium": 2,   # 28-40 videos
-                "high": 1      # >40 videos
-            }
+
 
 
 # ==================== CONFIGURACIÓN DEL MODELO ====================
 @dataclass
 class ModelConfig:
     """Configuración del modelo multimodal"""
-    # Arquitectura
-    backbone_name: str = "efficientnet_b3"  # o "resnet34"
-    embedding_dim: int = 512
-    fusion_type: str = "temporal_transformer"  # concat, sum, temporal_transformer
     
     # Backbone visual
     pretrained: bool = True
@@ -145,13 +128,6 @@ class ModelConfig:
     face_pca_dim: int = 64
 
     keypoints_dim: int = 300  # (num_pose_points + num_hand_points) * 4
-    
-    # Transformer de fusión (si es necesario)
-    num_transformer_layers: int = 2
-    num_attention_heads: int = 8
-    transformer_dropout: float = 0.1
-    
-    num_attention_heads_lstm: int = 8  # Heads para multihead attention en LSTM
     
     # Clasificador final
     classifier_hidden_dim: int = 1024
@@ -183,13 +159,13 @@ class TrainingConfig:
     loss_fn: str = "cross_entropy"
     focal_alpha: float = 0.25
     focal_gamma: float = 2.0
-    label_smoothing: float = 0.1  # CAMBIADO: Desactivado (antes 0.1)
+    label_smoothing: float = 0.15  # CAMBIADO: Desactivado (antes 0.1)
     
     # Scheduler - CAMBIADO a ReduceLROnPlateau
     scheduler_type: str = "plateau"  # CAMBIADO: De "onecycle" a "plateau"
-    scheduler_patience: int = 5      # NUEVO
-    scheduler_factor: float = 0.5    # NUEVO
-    scheduler_min_lr: float = 1e-6   # NUEVO
+    scheduler_patience: int = 5
+    scheduler_factor: float = 0.3
+    scheduler_min_lr: float = 1e-6
     
     # Los siguientes solo se usan si scheduler_type == "onecycle"
     lr_div_factor: float = 25.0

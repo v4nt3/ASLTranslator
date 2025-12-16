@@ -3,14 +3,12 @@ Script para precomputar features visuales usando ResNet101 frozen
 Convierte clips (T, H, W, 3) → (T, 1024) en float16
 """
 
-import torch
-import torch.nn as nn
-import numpy as np
+import torch #type: ignore
+import numpy as np #type: ignore
 from pathlib import Path
-from tqdm import tqdm
+from tqdm import  tqdm #type: ignore
 import logging
-from torchvision import models, transforms
-import cv2
+from torchvision import transforms #type: ignore
 
 from config import config
 

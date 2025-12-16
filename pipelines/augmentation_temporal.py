@@ -3,8 +3,8 @@ Data Augmentation para Features Precomputadas (Temporales)
 Aplica augmentation directamente sobre features fusionadas (T, 640)
 """
 
-import numpy as np
-import torch
+import numpy as np #type: ignore
+import torch #type: ignore
 from typing import Tuple
 import logging
 from config import config

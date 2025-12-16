@@ -1,6 +1,11 @@
 """
-Script de inferencia CORREGIDO que carga extractores guardados
-Ahora funciona correctamente en tiempo real
+Inference CORREGIDO - RESUELVE TODOS LOS PROBLEMAS DETECTADOS
+
+CAMBIOS CRÍTICOS:
+1. Extracción de frames usando np.linspace() (igual que entrenamiento)
+2. Detección mejorada de boundaries entre señas
+3. Acumulación inteligente que espera pausas
+4. Normalización consistente
 """
 
 import torch
@@ -12,23 +17,155 @@ from pathlib import Path
 from collections import deque
 import json
 import logging
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 import argparse
 from torchvision import transforms
+import sys
 
-from pipelines.models_temporal import TemporalLSTMClassifier
-from pipelines.save_extractors import ResNet101FeatureExtractor
-from pipelines.save_extractors import PoseFeatureExtractor
+sys.path.insert(0, str(Path(__file__).parent))
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+from pipelines.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
 
 
-class ASLRealtimeInference:
-    """Sistema de inferencia en tiempo real CORREGIDO"""
+class KeypointNormalizer:
+    """Normalización EXACTA de data_preparation.py"""
+    
+    def normalize_pose_keypoints(self, pose_kpts: np.ndarray) -> np.ndarray:
+        left_hip = pose_kpts[23][:3]
+        right_hip = pose_kpts[24][:3]
+        center = (left_hip + right_hip) / 2
+        
+        left_shoulder = pose_kpts[11][:3]
+        right_shoulder = pose_kpts[12][:3]
+        shoulder_dist = np.linalg.norm(left_shoulder - right_shoulder)
+        scale = max(shoulder_dist, 0.1)
+        
+        normalized = pose_kpts.copy()
+        normalized[:, :3] = (pose_kpts[:, :3] - center) / scale
+        normalized[:, :3] = np.clip(normalized[:, :3], -1, 1)
+        
+        return normalized
+    
+    def process_frame(self, pose_kpts: np.ndarray, hand_kpts: np.ndarray) -> np.ndarray:
+        pose_normalized = self.normalize_pose_keypoints(pose_kpts)
+        combined = np.concatenate([pose_normalized, hand_kpts], axis=0)
+        return combined
+
+
+class SignBoundaryDetector:
+    """
+    Detecta boundaries entre señas usando motion energy
+    Esto es CRÍTICO para videos con múltiples señas
+    """
+    
+    def __init__(self, min_pause_frames: int = 8, motion_threshold: float = 0.02):
+        self.min_pause_frames = min_pause_frames
+        self.motion_threshold = motion_threshold
+    
+    def calculate_motion_energy(self, keypoints_buffer: List[np.ndarray]) -> np.ndarray:
+        """
+        Calcula energía de movimiento frame a frame
+        
+        Returns:
+            motion: array (T-1,) con energía de movimiento
+        """
+        if len(keypoints_buffer) < 2:
+            return np.array([0.0])
+        
+        motion = []
+        for i in range(1, len(keypoints_buffer)):
+            curr = keypoints_buffer[i]
+            prev = keypoints_buffer[i-1]
+            
+            # Motion en manos (más importante)
+            hands_curr = curr[33:75, :3]  # 42 keypoints de manos
+            hands_prev = prev[33:75, :3]
+            
+            hand_motion = np.mean(np.linalg.norm(hands_curr - hands_prev, axis=1))
+            
+            # Motion en pose (menos peso)
+            pose_curr = curr[:33, :3]
+            pose_prev = prev[:33, :3]
+            pose_motion = np.mean(np.linalg.norm(pose_curr - pose_prev, axis=1))
+            
+            # Combinar: 70% manos, 30% pose
+            total_motion = 0.7 * hand_motion + 0.3 * pose_motion
+            motion.append(total_motion)
+        
+        return np.array(motion)
+    
+    def detect_pause(self, motion: np.ndarray, window_size: int = 5) -> bool:
+        """
+        Detecta si hay una pausa (movimiento bajo sostenido)
+        
+        Args:
+            motion: Energía de movimiento
+            window_size: Ventana para promediar
+        
+        Returns:
+            True si hay pausa
+        """
+        if len(motion) < window_size:
+            return False
+        
+        recent_motion = motion[-window_size:]
+        avg_motion = np.mean(recent_motion)
+        
+        return avg_motion < self.motion_threshold
+    
+    def find_sign_boundaries(self, keypoints_buffer: List[np.ndarray]) -> List[Tuple[int, int]]:
+        """
+        Encuentra segmentos de señas individuales en el buffer
+        
+        Returns:
+            Lista de (start, end) para cada seña detectada
+        """
+        motion = self.calculate_motion_energy(keypoints_buffer)
+        
+        if len(motion) == 0:
+            return [(0, len(keypoints_buffer))]
+        
+        # Suavizar motion
+        from scipy.ndimage import gaussian_filter1d
+        motion_smooth = gaussian_filter1d(motion, sigma=2)
+        
+        # Encontrar valleys (pausas)
+        boundaries = []
+        in_pause = False
+        pause_start = 0
+        
+        for i, m in enumerate(motion_smooth):
+            if m < self.motion_threshold:
+                if not in_pause:
+                    pause_start = i
+                    in_pause = True
+            else:
+                if in_pause and (i - pause_start) >= self.min_pause_frames:
+                    boundaries.append(pause_start + (i - pause_start) // 2)
+                in_pause = False
+        
+        # Convertir boundaries a segmentos
+        if len(boundaries) == 0:
+            return [(0, len(keypoints_buffer))]
+        
+        segments = []
+        prev = 0
+        for b in boundaries:
+            if b - prev >= 12:  # Mínimo 12 frames por seña
+                segments.append((prev, b))
+            prev = b
+        
+        # Último segmento
+        if len(keypoints_buffer) - prev >= 12:
+            segments.append((prev, len(keypoints_buffer)))
+        
+        return segments if segments else [(0, len(keypoints_buffer))]
+
+
+class ASLInferenceFixed:
+    """Sistema de inferencia CORREGIDO"""
     
     def __init__(
         self,
@@ -37,57 +174,85 @@ class ASLRealtimeInference:
         visual_extractor_path: Path,
         pose_extractor_path: Path,
         device: str = "cuda",
-        buffer_size: int = 24,
-        confidence_threshold: float = 0.3,
-        smoothing_window: int = 3
+        frames_per_sign: int = 24,  # MISMO que entrenamiento
+        confidence_threshold: float = 0.15,  # Subir umbral
+        max_buffer_seconds: float = 3.0  # Máximo 3 segundos de buffer
     ):
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
-        self.buffer_size = buffer_size
+        self.frames_per_sign = frames_per_sign
         self.confidence_threshold = confidence_threshold
-        self.smoothing_window = smoothing_window
+        self.max_buffer_seconds = max_buffer_seconds
         
-        # Cargar metadata
+        logger.info("="*60)
+        logger.info("ASL Inference FIXED - Resuelve problemas de extracción")
+        logger.info("="*60)
+        logger.info(f"Device: {self.device}")
+        logger.info(f"Frames per sign: {frames_per_sign}")
+        logger.info(f"Confidence threshold: {confidence_threshold}")
+        
+        # Cargar modelos
         self.class_to_gloss = self._load_class_mapping(metadata_path)
         self.num_classes = len(self.class_to_gloss)
-        logger.info(f"Cargadas {self.num_classes} clases")
+        logger.info(f"Classes: {self.num_classes}")
         
-        # CARGAR EXTRACTORES GUARDADOS
-        logger.info("Cargando extractores de features...")
+        self._load_models(model_path, visual_extractor_path, pose_extractor_path)
+        self._init_mediapipe()
         
-        try:
-            # Intentar cargar modelos completos primero
-            self.visual_extractor = torch.load(visual_extractor_path, map_location=self.device, weights_only=False)
-            logger.info(f"✓ Visual extractor cargado: {visual_extractor_path}")
-        except:
-            # Si falla, cargar solo state_dict
-            
-            self.visual_extractor = ResNet101FeatureExtractor(output_dim=1024).to(self.device)
-            self.visual_extractor.load_state_dict(torch.load(visual_extractor_path, map_location=self.device, weights_only=False))
-            logger.info(f"✓ Visual extractor (state_dict) cargado: {visual_extractor_path}")
+        self.normalizer = KeypointNormalizer()
+        self.boundary_detector = SignBoundaryDetector(
+            min_pause_frames=8,
+            motion_threshold=0.02
+        )
         
-        try:
-            self.pose_extractor = torch.load(pose_extractor_path, map_location=self.device, weights_only=False)
-            logger.info(f"✓ Pose extractor cargado: {pose_extractor_path}")
-        except:
-            
-            self.pose_extractor = PoseFeatureExtractor().to(self.device)
-            self.pose_extractor.load_state_dict(torch.load(pose_extractor_path, map_location=self.device, weights_only=False))
-            logger.info(f"✓ Pose extractor (state_dict) cargado: {pose_extractor_path}")
-        
-        self.visual_extractor.eval()
-        self.pose_extractor.eval()
-        
-        # Transform para frames (IGUAL que en precompute_visual_features.py)
         self.transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            )
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
         
-        # Cargar modelo temporal
-        logger.info(f"Cargando modelo desde: {model_path}")
+        # Buffers
+        self.frame_buffer = []
+        self.keypoints_buffer = []
+        self.fps = None
+        
+        logger.info(" Sistema inicializado\n")
+    
+    def _load_class_mapping(self, metadata_path: Path) -> dict:
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+        
+        class_to_gloss = {}
+        
+        if isinstance(metadata, dict):
+            if 'videos' in metadata:
+                for entry in metadata['videos']:
+                    cid = entry.get('class_id')
+                    gloss = entry.get('class_name') or entry.get('gloss', 'UNKNOWN')
+                    if cid is not None:
+                        class_to_gloss[int(cid)] = gloss
+            else:
+                for k, v in metadata.items():
+                    if isinstance(v, str):
+                        try:
+                            class_to_gloss[int(k)] = v
+                        except:
+                            pass
+                    elif isinstance(v, dict):
+                        cid = v.get('class_id')
+                        gloss = v.get('class_name') or v.get('gloss', 'UNKNOWN')
+                        if cid is not None and cid not in class_to_gloss:
+                            class_to_gloss[int(cid)] = gloss
+        
+        return class_to_gloss
+    
+    def _load_models(self, model_path, visual_path, pose_path):
+        self.visual_extractor = torch.load(visual_path, map_location=self.device, weights_only=False)
+        self.visual_extractor.eval()
+        
+        self.pose_extractor = torch.load(pose_path, map_location=self.device, weights_only=False)
+        self.pose_extractor.eval()
+        
+        from pipelines.models_temporal import TemporalLSTMClassifier
+        
         self.model = TemporalLSTMClassifier(
             input_dim=1152,
             hidden_dim=512,
@@ -97,343 +262,310 @@ class ASLRealtimeInference:
             bidirectional=True,
             use_attention=True
         ).to(self.device)
-        
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         self.model.eval()
         
-        # MediaPipe
-        logger.info("Inicializando MediaPipe...")
-        self.mp_holistic = mp.solutions.holistic
-        self.holistic = self.mp_holistic.Holistic(
+        logger.info(" Modelos cargados")
+    
+    def _init_mediapipe(self):
+        self.mp_pose = mp.solutions.pose
+        self.pose = self.mp_pose.Pose(
             static_image_mode=False,
             model_complexity=1,
-            enable_segmentation=False,
-            refine_face_landmarks=False,
-            min_detection_confidence=0.3,
-            min_tracking_confidence=0.3
+            smooth_landmarks=True,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
         )
-        self.mp_drawing = mp.solutions.drawing_utils
         
-        # Buffers
-        self.frame_buffer = deque(maxlen=buffer_size)
-        self.keypoints_buffer = deque(maxlen=buffer_size)
-        self.prediction_buffer = deque(maxlen=smoothing_window)
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=2,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
         
-        logger.info("✓ Sistema de inferencia inicializado correctamente")
+        logger.info(" MediaPipe inicializado")
     
-    def _load_class_mapping(self, metadata_path: Path) -> dict:
-        """Carga mapeo de class_id a gloss"""
-        with open(metadata_path, 'r') as f:
-            metadata = json.load(f)
+    def extract_keypoints(self, frame: np.ndarray) -> np.ndarray:
+        """Extrae keypoints (75, 4)"""
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        class_to_gloss = {}
+        # Pose
+        pose_results = self.pose.process(frame_rgb)
+        pose_kpts = np.zeros((33, 4), dtype=np.float32)
         
-        if isinstance(metadata, dict):
-            if 'videos' in metadata:
-                entries = metadata['videos']
-            else:
-                entries = []
-                for video_file, info in metadata.items():
-                    if isinstance(info, dict):
-                        entry = {'video_file': video_file, **info}
-                        entries.append(entry)
-        elif isinstance(metadata, list):
-            entries = metadata
-        else:
-            raise ValueError("Formato de metadata no reconocido")
+        if pose_results.pose_landmarks:
+            for i, lm in enumerate(pose_results.pose_landmarks.landmark):
+                pose_kpts[i] = [lm.x, lm.y, lm.z, lm.visibility]
         
-        for entry in entries:
-            if isinstance(entry, dict):
-                class_id = entry.get('class_id')
-                gloss = entry.get('gloss', 'UNKNOWN')
-                if class_id is not None:
-                    class_to_gloss[int(class_id)] = gloss
+        # Hands
+        hands_results = self.hands.process(frame_rgb)
+        hand_kpts = np.zeros((42, 4), dtype=np.float32)
         
-        return class_to_gloss
+        if hands_results.multi_hand_landmarks:
+            for hand_idx, hand_landmarks in enumerate(hands_results.multi_hand_landmarks[:2]):
+                start_idx = hand_idx * 21
+                for i, lm in enumerate(hand_landmarks.landmark):
+                    hand_kpts[start_idx + i] = [lm.x, lm.y, lm.z, 1.0]
+        
+        combined = self.normalizer.process_frame(pose_kpts, hand_kpts)
+        return combined
     
-    def extract_keypoints(self, frame: np.ndarray) -> Tuple[Optional[np.ndarray], any]:
-        """Extrae keypoints usando MediaPipe"""
-        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        image_rgb.flags.writeable = False
-        results = self.holistic.process(image_rgb)
+    def subsample_frames_uniform(self, frames: List[np.ndarray]) -> List[np.ndarray]:
+        """
+        CRÍTICO: Submuestrea frames usando np.linspace()
+        Esto replica EXACTAMENTE FrameExtractor de entrenamiento
+        """
+        total_frames = len(frames)
         
-        pose_kp = np.zeros((33, 4))
-        left_hand_kp = np.zeros((21, 4))
-        right_hand_kp = np.zeros((21, 4))
+        if total_frames <= self.frames_per_sign:
+            return frames
         
-        if results.pose_landmarks:
-            for i, landmark in enumerate(results.pose_landmarks.landmark):
-                pose_kp[i] = [landmark.x, landmark.y, landmark.z, landmark.visibility]
+        # np.linspace da índices uniformemente espaciados (IGUAL que entrenamiento)
+        indices = np.linspace(0, total_frames - 1, self.frames_per_sign, dtype=int)
         
-        if results.left_hand_landmarks:
-            for i, landmark in enumerate(results.left_hand_landmarks.landmark):
-                left_hand_kp[i] = [landmark.x, landmark.y, landmark.z, 1.0]
-        
-        if results.right_hand_landmarks:
-            for i, landmark in enumerate(results.right_hand_landmarks.landmark):
-                right_hand_kp[i] = [landmark.x, landmark.y, landmark.z, 1.0]
-        
-        keypoints = np.concatenate([
-            pose_kp.flatten(),
-            left_hand_kp.flatten(),
-            right_hand_kp.flatten()
-        ])
-        
-        return keypoints, results
-    
-    def add_frame(self, frame: np.ndarray) -> any:
-        """Agrega frame y extrae keypoints"""
-        frame_resized = cv2.resize(frame, (224, 224))
-        keypoints, results = self.extract_keypoints(frame)
-        
-        if keypoints is not None:
-            self.frame_buffer.append(frame_resized)
-            self.keypoints_buffer.append(keypoints)
-        
-        return results
-    
-    def is_ready(self) -> bool:
-        """Verifica si hay suficientes frames"""
-        return len(self.frame_buffer) >= self.buffer_size
+        return [frames[i] for i in indices]
     
     @torch.no_grad()
-    def predict(self) -> Tuple[str, float, List[Tuple[str, float]]]:
-        """Realiza predicción sobre el buffer actual"""
-        if not self.is_ready():
-            return None, 0.0, []
+    def predict_sign(self, frames: List[np.ndarray], keypoints: List[np.ndarray]) -> Tuple[str, float, List]:
+        """
+        Predice UNA seña a partir de frames y keypoints
         
-        # Convertir frames a features visuales
-        frames_batch = torch.stack([
-            self.transform(frame) for frame in self.frame_buffer
+        CRÍTICO: Ahora submuestrea frames uniformemente
+        """
+        # 1. Submuestrear a frames_per_sign usando np.linspace()
+        if len(frames) > self.frames_per_sign:
+            frames = self.subsample_frames_uniform(frames)
+            keypoints = self.subsample_frames_uniform(keypoints)
+        
+        # 2. Padding si es necesario
+        while len(frames) < self.frames_per_sign:
+            frames.append(frames[-1].copy())
+            keypoints.append(keypoints[-1].copy())
+        
+        # 3. Truncar a frames_per_sign exacto
+        frames = frames[:self.frames_per_sign]
+        keypoints = keypoints[:self.frames_per_sign]
+        
+        # 4. Extraer features visuales
+        frames_tensor = torch.stack([
+            self.transform(f) for f in frames
         ]).to(self.device)
         
-        visual_features = self.visual_extractor(frames_batch)  # (T, 1024)
+        visual_features = self.visual_extractor(frames_tensor)
         
-        # Convertir keypoints a features de pose
-        keypoints_batch = torch.from_numpy(
-            np.stack(list(self.keypoints_buffer))
-        ).float().to(self.device)
+        # 5. Extraer features de pose
+        keypoints_flat = np.stack([kp.flatten() for kp in keypoints])
+        keypoints_tensor = torch.from_numpy(keypoints_flat).float().to(self.device)
         
-        pose_features = self.pose_extractor(keypoints_batch)  # (T, 128)
+        pose_features = self.pose_extractor(keypoints_tensor)
         
-        # Fusionar features
-        fused_features = torch.cat([visual_features, pose_features], dim=1)  # (T, 1152)
-        fused_features = fused_features.unsqueeze(0)  # (1, T, 1152)
+        # 6. Fusionar y predecir
+        fused = torch.cat([visual_features, pose_features], dim=1)
+        fused = fused.unsqueeze(0)
         
-        # Predecir
-        logits = self.model(fused_features)
+        logits = self.model(fused)
         probs = torch.softmax(logits, dim=1)[0]
         
         # Top-5
-        top5_probs, top5_indices = torch.topk(probs, k=min(5, self.num_classes))
+        top5_probs, top5_idx = torch.topk(probs, k=min(5, self.num_classes))
+        top5 = [(self.class_to_gloss.get(int(i), f"CLASS_{i}"), float(p))
+                for p, i in zip(top5_probs.cpu(), top5_idx.cpu())]
         
-        top5_results = []
-        for prob, idx in zip(top5_probs.cpu().numpy(), top5_indices.cpu().numpy()):
-            gloss = self.class_to_gloss.get(int(idx), f"CLASS_{idx}")
-            top5_results.append((gloss, float(prob)))
+        best_idx = int(top5_idx[0])
+        best_prob = float(top5_probs[0])
+        best_gloss = self.class_to_gloss.get(best_idx, f"CLASS_{best_idx}")
         
-        # Mejor predicción
-        predicted_class = top5_indices[0].item()
-        predicted_gloss = self.class_to_gloss.get(predicted_class, f"CLASS_{predicted_class}")
-        confidence = top5_probs[0].item()
-        
-        # Suavizar
-        self.prediction_buffer.append((predicted_gloss, confidence))
-        
-        if len(self.prediction_buffer) >= self.smoothing_window:
-            glosses = [p[0] for p in self.prediction_buffer]
-            most_common = max(set(glosses), key=glosses.count)
-            avg_confidence = np.mean([p[1] for p in self.prediction_buffer if p[0] == most_common])
-            return most_common, avg_confidence, top5_results
-        
-        return predicted_gloss, confidence, top5_results
+        return best_gloss, best_prob, top5
     
-    def draw_results(
+    def process_video_with_boundaries(
         self,
-        frame: np.ndarray,
-        predicted_gloss: str,
-        confidence: float,
-        top5: List[Tuple[str, float]],
-        results
-    ) -> np.ndarray:
-        """Dibuja resultados"""
-        frame_annotated = frame.copy()
-        h, w = frame.shape[:2]
+        video_path: Path,
+        output_path: Optional[Path] = None
+    ) -> List[Dict]:
+        """
+        Procesa video detectando boundaries entre señas
         
-        # Landmarks
-        if results.pose_landmarks:
-            self.mp_drawing.draw_landmarks(
-                frame_annotated, results.pose_landmarks,
-                self.mp_holistic.POSE_CONNECTIONS,
-                self.mp_drawing.DrawingSpec(color=(80, 110, 10), thickness=2, circle_radius=2),
-                self.mp_drawing.DrawingSpec(color=(80, 256, 121), thickness=2)
-            )
+        ESTO RESUELVE EL PROBLEMA DE SEÑAS CONTINUAS
+        """
+        logger.info(f"Procesando video con detección de boundaries: {video_path}")
         
-        if results.left_hand_landmarks:
-            self.mp_drawing.draw_landmarks(
-                frame_annotated, results.left_hand_landmarks,
-                self.mp_holistic.HAND_CONNECTIONS,
-                self.mp_drawing.DrawingSpec(color=(121, 22, 76), thickness=2, circle_radius=2),
-                self.mp_drawing.DrawingSpec(color=(121, 44, 250), thickness=2)
-            )
+        cap = cv2.VideoCapture(str(video_path))
+        self.fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
-        if results.right_hand_landmarks:
-            self.mp_drawing.draw_landmarks(
-                frame_annotated, results.right_hand_landmarks,
-                self.mp_holistic.HAND_CONNECTIONS,
-                self.mp_drawing.DrawingSpec(color=(245, 117, 66), thickness=2, circle_radius=2),
-                self.mp_drawing.DrawingSpec(color=(245, 66, 230), thickness=2)
-            )
+        logger.info(f"  FPS: {self.fps:.1f}, Size: {width}x{height}")
         
-        # Panel
-        panel_height = 200
-        panel = np.zeros((panel_height, w, 3), dtype=np.uint8)
-        panel[:] = (30, 30, 30)
+        # Leer y procesar TODOS los frames
+        all_frames = []
+        all_keypoints = []
         
-        # Predicción
-        if confidence >= self.confidence_threshold:
-            color = (0, 255, 0) if confidence > 0.5 else (0, 165, 255)
-            text = f"Seña: {predicted_gloss}"
-            conf_text = f"Confianza: {confidence:.2%}"
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
             
-            cv2.putText(panel, text, (10, 40), cv2.FONT_HERSHEY_SIMPLEX,
-                       1.0, color, 2, cv2.LINE_AA)
-            cv2.putText(panel, conf_text, (10, 80), cv2.FONT_HERSHEY_SIMPLEX,
-                       0.7, color, 2, cv2.LINE_AA)
-        else:
-            cv2.putText(panel, "No hay detección confiable", (10, 40),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (100, 100, 100), 2, cv2.LINE_AA)
+            frame_resized = cv2.resize(frame, (224, 224))
+            keypoints = self.extract_keypoints(frame)
+            
+            all_frames.append(frame_resized)
+            all_keypoints.append(keypoints)
+            
+            frame_idx += 1
         
-        # Top-3
-        y_offset = 120
-        cv2.putText(panel, "Alternativas:", (10, y_offset),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1, cv2.LINE_AA)
+        cap.release()
         
-        for i, (gloss, prob) in enumerate(top5[:3]):
-            y_offset += 25
-            text = f"{i+1}. {gloss}: {prob:.1%}"
-            cv2.putText(panel, text, (20, y_offset),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1, cv2.LINE_AA)
+        logger.info(f"  Total frames leídos: {len(all_frames)}")
         
-        # Buffer status
-        buffer_status = f"Buffer: {len(self.frame_buffer)}/{self.buffer_size}"
-        cv2.putText(frame_annotated, buffer_status, (10, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+        # Detectar boundaries entre señas
+        logger.info("  Detectando boundaries entre señas...")
+        segments = self.boundary_detector.find_sign_boundaries(all_keypoints)
         
-        result = np.vstack([frame_annotated, panel])
-        return result
+        logger.info(f"  Señas detectadas: {len(segments)}")
+        
+        # Predecir cada segmento
+        predictions = []
+        
+        for seg_idx, (start, end) in enumerate(segments):
+            seg_frames = all_frames[start:end]
+            seg_keypoints = all_keypoints[start:end]
+            
+            duration = (end - start) / self.fps
+            
+            logger.info(f"\n  Segmento {seg_idx+1}: frames [{start}, {end}], duración {duration:.2f}s")
+            
+            # Skip segmentos muy cortos
+            if len(seg_frames) < 8:
+                logger.info(f"    ⊘ Segmento muy corto, saltando")
+                continue
+            
+            # Predecir
+            gloss, conf, top5 = self.predict_sign(seg_frames, seg_keypoints)
+            
+            logger.info(f"    → {gloss} ({conf:.1%})")
+            logger.info(f"    Top-3: {[(g, f'{p:.1%}') for g, p in top5[:3]]}")
+            
+            if conf >= self.confidence_threshold:
+                predictions.append({
+                    'start_frame': start,
+                    'end_frame': end,
+                    'start_time': start / self.fps,
+                    'end_time': end / self.fps,
+                    'gloss': gloss,
+                    'confidence': conf,
+                    'top5': top5
+                })
+        
+        # Log resultado final
+        logger.info(f"\n{'='*60}")
+        logger.info("TRADUCCIÓN DEL VIDEO:")
+        logger.info(f"{'='*60}")
+        
+        sentence = []
+        for p in predictions:
+            sentence.append(p['gloss'])
+            logger.info(f"  [{p['start_time']:.2f}s - {p['end_time']:.2f}s] "
+                       f"{p['gloss']} ({p['confidence']:.1%})")
+        
+        logger.info(f"\nOración: {' '.join(sentence)}")
+        logger.info(f"{'='*60}\n")
+        
+        # Guardar video anotado
+        if output_path:
+            self._save_annotated_video(
+                all_frames, predictions, output_path, 
+                self.fps, width, height
+            )
+        
+        return predictions
     
-    def run(self, camera_id: int = 0, show_fps: bool = True):
-        """Ejecuta inferencia en tiempo real"""
-        logger.info(f"Iniciando captura desde cámara {camera_id}...")
+    def _save_annotated_video(self, frames, predictions, output_path, fps, width, height):
+        """Guarda video con anotaciones"""
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         
-        cap = cv2.VideoCapture(camera_id)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        cap.set(cv2.CAP_PROP_FPS, 30)
+        # Resize frames back to original size
+        frames_resized = [cv2.resize(f, (width, height)) for f in frames]
         
-        if not cap.isOpened():
-            logger.error("No se pudo abrir la cámara")
-            return
+        out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height + 150))
         
-        logger.info("✓ Cámara inicializada")
-        logger.info("\nControles:")
-        logger.info("  ESPACIO - Limpiar buffer")
-        logger.info("  Q - Salir\n")
+        logger.info(f"Generando video anotado: {output_path}")
         
-        import time
-        frame_count = 0
-        start_time = time.time()
-        fps = 0
-        
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
+        for i, frame in enumerate(frames_resized):
+            # Panel inferior
+            panel = np.zeros((150, width, 3), dtype=np.uint8)
+            panel[:] = (30, 30, 30)
+            
+            # Buscar predicción activa
+            current_pred = None
+            for p in predictions:
+                if p['start_frame'] <= i < p['end_frame']:
+                    current_pred = p
                     break
-                
-                results = self.add_frame(frame)
-                
-                predicted_gloss, confidence, top5 = None, 0.0, []
-                if self.is_ready():
-                    predicted_gloss, confidence, top5 = self.predict()
-                
-                frame_display = self.draw_results(
-                    frame, predicted_gloss or "Acumulando...",
-                    confidence, top5, results
-                )
-                
-                if show_fps:
-                    frame_count += 1
-                    elapsed = time.time() - start_time
-                    if elapsed > 1.0:
-                        fps = frame_count / elapsed
-                        frame_count = 0
-                        start_time = time.time()
-                    
-                    cv2.putText(frame_display, f"FPS: {fps:.1f}",
-                               (frame.shape[1] - 120, 30),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                
-                cv2.imshow('ASL Real-time Detection', frame_display)
-                
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
-                    break
-                elif key == ord(' '):
-                    logger.info("Buffer limpiado")
-                    self.frame_buffer.clear()
-                    self.keypoints_buffer.clear()
-                    self.prediction_buffer.clear()
+            
+            if current_pred:
+                color = (0, 255, 0) if current_pred['confidence'] > 0.2 else (0, 165, 255)
+                text = f"{current_pred['gloss']} ({current_pred['confidence']:.1%})"
+                cv2.putText(panel, text, (20, 50),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
+            else:
+                cv2.putText(panel, "...", (20, 50),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 100, 100), 2)
+            
+            # Oración hasta ahora
+            sentence = ' '.join([p['gloss'] for p in predictions if p['end_frame'] <= i])
+            if sentence:
+                cv2.putText(panel, sentence, (20, 120),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
+            # Combinar
+            result = np.vstack([frame, panel])
+            out.write(result)
         
-        finally:
-            cap.release()
-            cv2.destroyAllWindows()
-            logger.info("Inferencia finalizada")
+        out.release()
+        logger.info(f" Video guardado: {output_path}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Inferencia en tiempo real ASL (CORREGIDO)")
+    parser = argparse.ArgumentParser(description='ASL Inference FIXED')
     
-    parser.add_argument("--model_path", type=Path, required=True)
-    parser.add_argument("--metadata_path", type=Path, required=True)
-    parser.add_argument("--visual_extractor", type=Path, required=True,
-                       help="Ruta a visual_extractor_full.pt")
-    parser.add_argument("--pose_extractor", type=Path, required=True,
-                       help="Ruta a pose_extractor_full.pt")
-    parser.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"])
-    parser.add_argument("--camera_id", type=int, default=0)
-    parser.add_argument("--buffer_size", type=int, default=24)
-    parser.add_argument("--confidence_threshold", type=float, default=0.3)
-    parser.add_argument("--smoothing_window", type=int, default=3)
+    parser.add_argument('--video_path', type=str, required=True)
+    parser.add_argument('--model_path', type=str, required=True)
+    parser.add_argument('--metadata_path', type=str, required=True)
+    parser.add_argument('--visual_extractor', type=str, required=True)
+    parser.add_argument('--pose_extractor', type=str, required=True)
+    parser.add_argument('--output_video', type=str, help='Ruta para video anotado')
+    parser.add_argument('--confidence_threshold', type=float, default=0.15)
+    parser.add_argument('--frames_per_sign', type=int, default=24)
+    parser.add_argument('--device', type=str, default="cuda", choices=["cuda", "cpu"])
     
     args = parser.parse_args()
     
-    # Validar
-    for path, name in [
-        (args.model_path, "Modelo"),
-        (args.metadata_path, "Metadata"),
-        (args.visual_extractor, "Visual extractor"),
-        (args.pose_extractor, "Pose extractor")
-    ]:
-        if not path.exists():
-            logger.error(f"{name} no encontrado: {path}")
-            return
+    video_path = Path(args.video_path)
+    if not video_path.exists():
+        logger.error(f"Video no encontrado: {video_path}")
+        return
     
-    # Crear sistema
-    system = ASLRealtimeInference(
-        model_path=args.model_path,
-        metadata_path=args.metadata_path,
-        visual_extractor_path=args.visual_extractor,
-        pose_extractor_path=args.pose_extractor,
+    # Crear sistema de inferencia
+    inference = ASLInferenceFixed(
+        model_path=Path(args.model_path),
+        metadata_path=Path(args.metadata_path),
+        visual_extractor_path=Path(args.visual_extractor),
+        pose_extractor_path=Path(args.pose_extractor),
         device=args.device,
-        buffer_size=args.buffer_size,
-        confidence_threshold=args.confidence_threshold,
-        smoothing_window=args.smoothing_window
+        frames_per_sign=args.frames_per_sign,
+        confidence_threshold=args.confidence_threshold
     )
     
-    # Ejecutar
-    system.run(camera_id=args.camera_id)
+    # Procesar video
+    output_path = Path(args.output_video) if args.output_video else None
+    
+    inference.process_video_with_boundaries(
+        video_path=video_path,
+        output_path=output_path
+    )
 
 
 if __name__ == "__main__":

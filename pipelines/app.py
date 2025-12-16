@@ -7,19 +7,17 @@ Soporta:
 4. Exportación de transcripción a texto
 """
 
-import torch
-import torch.nn as nn
-import numpy as np
-import cv2
-import mediapipe as mp
+import torch #type: ignore
+import numpy as np #type: ignore
+import cv2 #type: ignore
+import mediapipe as mp #type: ignore
 from pathlib import Path
 import json
 import logging
 from typing import Optional, Tuple, List, Dict
 import argparse
-from torchvision import transforms
-from tqdm import tqdm
-from collections import deque
+from torchvision import transforms #type: ignore
+from tqdm import tqdm #type: ignore
 
 from pipelines.models_temporal import TemporalLSTMClassifier
 from pipelines.save_extractors import ResNet101FeatureExtractor

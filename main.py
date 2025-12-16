@@ -28,7 +28,7 @@ def diagnose_training_pipeline():
     feature_files = list(features_dir.glob("*_fused.npy"))
     
     if len(feature_files) == 0:
-        print("❌ ERROR: No hay features en data/features_fused/")
+        print(" ERROR: No hay features en data/features_fused/")
         return
     
     print(f"✓ Encontrados {len(feature_files)} archivos de features")
@@ -55,16 +55,16 @@ def diagnose_training_pipeline():
     
     # Verificar si hay features degeneradas
     if all_features.std() < 0.01:
-        print("❌ PROBLEMA CRÍTICO: Features casi constantes (std muy baja)")
+        print(" PROBLEMA CRÍTICO: Features casi constantes (std muy baja)")
         print("   Las features no tienen variabilidad suficiente")
         return
     
     if (all_features == 0).sum() / all_features.size > 0.5:
-        print("❌ PROBLEMA: >50% de features son ceros")
+        print(" PROBLEMA: >50% de features son ceros")
         return
     
     if np.isnan(all_features).sum() > 0 or np.isinf(all_features).sum() > 0:
-        print("❌ PROBLEMA: Features contienen NaN o Inf")
+        print(" PROBLEMA: Features contienen NaN o Inf")
         return
     
     print("✓ Features parecen válidas")
@@ -121,7 +121,7 @@ def diagnose_training_pipeline():
     print(f"\n  Ratio de desbalanceo: {imbalance_ratio:.2f}x")
     
     if imbalance_ratio > 100:
-        print("⚠ ADVERTENCIA: Desbalanceo extremo de clases")
+        print(" ADVERTENCIA: Desbalanceo extremo de clases")
     
     # ==================== 3. VERIFICAR MODELO ====================
     print("\n[3/6] Verificando arquitectura del modelo...")
@@ -146,7 +146,7 @@ def diagnose_training_pipeline():
     print(f"  Parámetros entrenables: {trainable_params:,}")
     
     if trainable_params == 0:
-        print("❌ PROBLEMA CRÍTICO: No hay parámetros entrenables")
+        print(" PROBLEMA CRÍTICO: No hay parámetros entrenables")
         return
     
     # Test forward pass
@@ -160,18 +160,18 @@ def diagnose_training_pipeline():
         print(f"  Expected: (2, 2286)")
         
         if output.shape != (2, 2286):
-            print("❌ PROBLEMA: Output shape incorrecto")
+            print(" PROBLEMA: Output shape incorrecto")
             return
         
         # Verificar que no sea constante
         if output.std() < 0.01:
-            print("❌ PROBLEMA: Outputs casi constantes")
+            print(" PROBLEMA: Outputs casi constantes")
             return
         
         print("✓ Arquitectura del modelo correcta")
         
     except Exception as e:
-        print(f"❌ ERROR en forward pass: {e}")
+        print(f" ERROR en forward pass: {e}")
         return
     
     # ==================== 4. VERIFICAR LOSS ====================
@@ -189,7 +189,7 @@ def diagnose_training_pipeline():
     expected_loss = np.log(2286)
     
     if abs(loss.item() - expected_loss) > 2.0:
-        print("⚠ ADVERTENCIA: Loss inicial inusual")
+        print(" ADVERTENCIA: Loss inicial inusual")
     else:
         print("✓ Loss function correcta")
     
@@ -224,7 +224,7 @@ def diagnose_training_pipeline():
     print(f"    Loss change: {losses[0] - losses[-1]:.4f}")
     
     if losses[0] - losses[-1] < 0.01:
-        print("❌ PROBLEMA CRÍTICO: Loss no está bajando")
+        print(" PROBLEMA CRÍTICO: Loss no está bajando")
         print("   El modelo no está aprendiendo nada")
         return
     else:
@@ -249,7 +249,7 @@ def diagnose_training_pipeline():
     print(f"  Test samples: {len(test_data)}")
     
     if len(train_data) < 100:
-        print("⚠ ADVERTENCIA: Muy pocos datos de entrenamiento")
+        print(" ADVERTENCIA: Muy pocos datos de entrenamiento")
     
     # Cargar batch real
     real_paths = [item[0] for item in train_data[:4]]
@@ -331,7 +331,7 @@ def diagnose_training_pipeline():
         print("\n  RECOMENDACIÓN: Ajustar hiperparámetros de entrenamiento")
     
     elif acc.item() > 0.2:
-        print("⚠ El modelo aprende LENTAMENTE")
+        print(" El modelo aprende LENTAMENTE")
         print("\n  Posibles causas:")
         print("  1. Features con poco poder discriminativo")
         print("  2. Modelo muy complejo para los datos")
@@ -339,7 +339,7 @@ def diagnose_training_pipeline():
         print("\n  RECOMENDACIÓN: Reducir dropout y label smoothing")
     
     else:
-        print("❌ El modelo NO PUEDE aprender con estos datos")
+        print(" El modelo NO PUEDE aprender con estos datos")
         print("\n  Posibles causas CRÍTICAS:")
         print("  1. Features completamente incorrectas")
         print("  2. Labels incorrectos o corruptos")

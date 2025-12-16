@@ -4,11 +4,9 @@ Crea (T, 1152) = concatenate((T, 1024), (T, 128))
 SIN proyección adicional para mantener toda la información
 """
 
-import torch
-import torch.nn as nn
-import numpy as np
+import numpy as np #type: ignore
 from pathlib import Path
-from tqdm import tqdm
+from tqdm import tqdm #type: ignore
 import logging
 
 logging.basicConfig(

@@ -3,20 +3,20 @@ Script de entrenamiento avanzado con técnicas de optimización
 Mantiene arquitectura simple pero agrega mejoras de entrenamiento
 """
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import OneCycleLR, ReduceLROnPlateau
-from torch.cuda.amp import autocast, GradScaler
-import numpy as np
-from tqdm import tqdm
+import torch #type: ignore
+import torch.nn as nn #type: ignore
+import torch.nn.functional as F #type: ignore
+from torch.optim import AdamW #type: ignore
+from torch.optim.lr_scheduler import OneCycleLR, ReduceLROnPlateau #type: ignore
+from torch.cuda.amp import autocast, GradScaler #type: ignore
+import numpy as np #type: ignore
+from tqdm import tqdm #type: ignore
 import json
 import os
 from pathlib import Path
 
-from config_advanced_optimization import get_config
-from models_temporal_optimized import TemporalLSTMClassifier
+from config_advanced_optimization import get_config #type: ignore
+from models_temporal_optimized import TemporalLSTMClassifier #type: ignore
 from dataset_temporal import TemporalFeatureDataset
 
 
