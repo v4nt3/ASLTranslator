@@ -31,7 +31,7 @@ class DataPaths:
     features_visual: Path = DATA_ROOT / "features_visual"
     features_pose: Path = DATA_ROOT / "features_pose"
     features_fused: Path = DATA_ROOT / "features_fused"
-    dataset_meta: Path = DATA_ROOT / "dataset_metadata.json"  # Agregando ruta a dataset_meta.json para carga directa sin CSV
+    dataset_meta: Path = DATA_ROOT / "dataset_meta.json"  # Agregando ruta a dataset_meta.json para carga directa sin CSV
     
     def __post_init__(self):
         for path in [
@@ -151,8 +151,8 @@ class TrainingConfig:
     
     # Optimización
     optimizer: str = "adam"
-    learning_rate: float = 3e-4  # CAMBIADO: Más conservador (antes 1e-3)
-    weight_decay: float = 1e-4   # CAMBIADO: Menos regularización (antes 1e-4)
+    learning_rate: float = 1e-4  # CAMBIADO: Más conservador (antes 1e-3)
+    weight_decay: float = 1e-5   # CAMBIADO: Menos regularización (antes 1e-4)
     momentum: float = 0.9
     
     # Loss

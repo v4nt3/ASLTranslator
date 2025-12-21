@@ -48,6 +48,8 @@ models/
 data/features_fused
 dataset/
 testing/
+data/processed_frames
+data/processed_keypoints
 *.csv
 *.tsv
 *.zip
