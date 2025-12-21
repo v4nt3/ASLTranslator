@@ -151,15 +151,15 @@ class TrainingConfig:
     
     # Optimización
     optimizer: str = "adam"
-    learning_rate: float = 1e-4  # CAMBIADO: Más conservador (antes 1e-3)
-    weight_decay: float = 1e-5   # CAMBIADO: Menos regularización (antes 1e-4)
+    learning_rate: float = 3e-4  # CAMBIADO: Más conservador (antes 1e-3)
+    weight_decay: float = 1e-4   # CAMBIADO: Menos regularización (antes 1e-4)
     momentum: float = 0.9
     
     # Loss
     loss_fn: str = "cross_entropy"
     focal_alpha: float = 0.25
     focal_gamma: float = 2.0
-    label_smoothing: float = 0.15  # CAMBIADO: Desactivado (antes 0.1)
+    label_smoothing: float = 0.1  # CAMBIADO: Desactivado (antes 0.1)
     
     # Scheduler - CAMBIADO a ReduceLROnPlateau
     scheduler_type: str = "plateau"  # CAMBIADO: De "onecycle" a "plateau"
@@ -198,7 +198,7 @@ class TrainingConfig:
     # NUEVO: Parámetros de modelo
     model_hidden_dim: int = 512
     model_num_layers: int = 2
-    model_dropout: float = 0.2  # CAMBIADO: Menos dropout (antes 0.3)
+    model_dropout: float = 0.3  # CAMBIADO: Menos dropout (antes 0.3)
     model_bidirectional: bool = True
 
 # ==================== CONFIGURACIÓN DE EVALUACIÓN ====================
