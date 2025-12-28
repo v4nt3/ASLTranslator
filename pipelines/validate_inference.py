@@ -173,28 +173,28 @@ class PreprocessingValidator:
             # === PROCESAMIENTO VISUAL ===
             logger.info(f"\n--- Frame {frame_count} ---")
             logger.info(f"Original frame shape: {frame.shape}, dtype: {frame.dtype}")
+            logger.info(f"Frame color format: BGR (from cv2.VideoCapture)")
             
             # Resize a 224x224 (EXACTAMENTE como en training)
             frame_resized = cv2.resize(frame, (224, 224))
             logger.info(f"After resize: {frame_resized.shape}")
             
-            # Convertir BGR -> RGB
-            frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
-            logger.info(f"After BGR->RGB: {frame_rgb.shape}, dtype: {frame_rgb.dtype}")
-            logger.info(f"  Value range: [{frame_rgb.min()}, {frame_rgb.max()}], mean: {frame_rgb.mean():.2f}")
+            # El training usa cv2.VideoCapture que devuelve BGR, y ToTensor NO convierte a RGB
+            logger.info(f"Manteniendo formato BGR (como en entrenamiento)")
+            logger.info(f"  Value range: [{frame_resized.min()}, {frame_resized.max()}], mean: {frame_resized.mean():.2f}")
             
             # Asegurar uint8 en rango [0, 255]
-            if frame_rgb.dtype != np.uint8:
-                if frame_rgb.max() <= 1.0:
-                    frame_rgb = (frame_rgb * 255).astype(np.uint8)
+            if frame_resized.dtype != np.uint8:
+                if frame_resized.max() <= 1.0:
+                    frame_resized = (frame_resized * 255).astype(np.uint8)
                 else:
-                    frame_rgb = frame_rgb.astype(np.uint8)
+                    frame_resized = frame_resized.astype(np.uint8)
             
-            logger.info(f"After uint8 conversion: dtype: {frame_rgb.dtype}")
-            logger.info(f"  Value range: [{frame_rgb.min()}, {frame_rgb.max()}], mean: {frame_rgb.mean():.2f}")
+            logger.info(f"After uint8 conversion: dtype: {frame_resized.dtype}")
+            logger.info(f"  Value range: [{frame_resized.min()}, {frame_resized.max()}], mean: {frame_resized.mean():.2f}")
             
             # Aplicar transform (ToTensor + Normalize)
-            frame_tensor = self.visual_transform(frame_rgb).unsqueeze(0).to(self.device)
+            frame_tensor = self.visual_transform(frame_resized).unsqueeze(0).to(self.device)
             logger.info(f"After transform: shape: {frame_tensor.shape}, dtype: {frame_tensor.dtype}")
             logger.info(f"  Value range: [{frame_tensor.min().item():.4f}, {frame_tensor.max().item():.4f}]")
             logger.info(f"  Mean: {frame_tensor.mean().item():.4f}, Std: {frame_tensor.std().item():.4f}")
@@ -307,12 +307,46 @@ def main():
     
     parser = argparse.ArgumentParser(description="Validar preprocesamiento")
     parser.add_argument("--training_features", type=Path, required=True,
-                       help="Archivo .npy con features de entrenamiento")
-    parser.add_argument("--video", type=Path, required=True,
-                       help="Video original correspondiente")
+                       help="Archivo .npy con features de entrenamiento o directorio")
+    parser.add_argument("--video", type=Path, required=False,
+                       help="Video original correspondiente (opcional si se pasa directorio)")
     parser.add_argument("--device", type=str, default="cuda")
     
     args = parser.parse_args()
+    
+    if args.training_features.is_dir():
+        # Buscar archivos .npy en el directorio
+        npy_files = list(args.training_features.rglob("*.npy"))
+        if not npy_files:
+            logger.error(f"No se encontraron archivos .npy en {args.training_features}")
+            return
+        
+        logger.info(f"Encontrados {len(npy_files)} archivos .npy")
+        logger.info("Usando el primero para validación:")
+        args.training_features = npy_files[0]
+        logger.info(f"  {args.training_features}")
+        
+        # Si no se especificó video, intentar encontrarlo
+        if args.video is None:
+            # El nombre del archivo .npy debería corresponder al video
+            class_name = args.training_features.parent.name
+            video_name = args.training_features.stem  # Sin extensión
+            
+            # Buscar en dataset
+            dataset_dir = Path("data/dataset")
+            if dataset_dir.exists():
+                possible_videos = list(dataset_dir.rglob(f"*{video_name}*.mp4"))
+                if possible_videos:
+                    args.video = possible_videos[0]
+                    logger.info(f"Video encontrado: {args.video}")
+    
+    if not args.training_features.exists():
+        logger.error(f"Archivo no encontrado: {args.training_features}")
+        return
+    
+    if args.video is None or not args.video.exists():
+        logger.error(f"Video no encontrado. Especifica --video o coloca el video en data/dataset")
+        return
     
     validator = PreprocessingValidator(device=args.device)
     

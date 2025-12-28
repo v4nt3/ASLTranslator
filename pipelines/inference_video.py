@@ -156,12 +156,16 @@ class VideoInference:
         model_path: Path,
         metadata_path: Path,
         device: str = "cuda",
-        confidence_threshold: float = 0.3
+        confidence_threshold: float = 0.05,  # Reducido threshold por defecto de 0.3 a 0.05
+        use_segmentation: bool = True  # Agregado parámetro para controlar segmentación
     ):
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         self.confidence_threshold = confidence_threshold
+        self.use_segmentation = use_segmentation  # Guardar configuración
         
         logger.info(f"Inicializando VideoInference en {self.device}")
+        logger.info(f"Segmentación automática: {'ACTIVADA' if use_segmentation else 'DESACTIVADA'}")  # Log de configuración
+        logger.info(f"Confidence threshold: {confidence_threshold:.2%}")  # Log threshold
         
         # Cargar mapeo de clases
         self.class_names = self._load_class_names(metadata_path)
@@ -314,22 +318,22 @@ class VideoInference:
         """Extrae features fusionadas (1152 dims)"""
         # Visual features (1024)
         frame_resized = cv2.resize(frame, (224, 224))
-        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
         
-        logger.debug(f"[v0] Frame shape before uint8: {frame_rgb.shape}, dtype: {frame_rgb.dtype}")
-        logger.debug(f"[v0] Frame value range: min={frame_rgb.min()}, max={frame_rgb.max()}, mean={frame_rgb.mean():.2f}")
+        logger.debug(f"[v0] Frame shape: {frame_resized.shape}, dtype: {frame_resized.dtype}")
+        logger.debug(f"[v0] Frame value range: min={frame_resized.min()}, max={frame_resized.max()}, mean={frame_resized.mean():.2f}")
         
         # Ensure frame is uint8 in range [0, 255]
-        if frame_rgb.dtype != np.uint8:
-            if frame_rgb.max() <= 1.0:
-                frame_rgb = (frame_rgb * 255).astype(np.uint8)
+        if frame_resized.dtype != np.uint8:
+            if frame_resized.max() <= 1.0:
+                frame_resized = (frame_resized * 255).astype(np.uint8)
             else:
-                frame_rgb = frame_rgb.astype(np.uint8)
+                frame_resized = frame_resized.astype(np.uint8)
         
-        logger.debug(f"[v0] Frame after uint8: dtype={frame_rgb.dtype}, min={frame_rgb.min()}, max={frame_rgb.max()}")
+        logger.debug(f"[v0] Frame after uint8: dtype={frame_resized.dtype}, min={frame_resized.min()}, max={frame_resized.max()}")
         
         # Apply the same transform as in training (ToTensor + Normalize)
-        frame_tensor = self.visual_transform(frame_rgb).unsqueeze(0).to(self.device)
+        # Note: ToTensor does NOT convert BGR to RGB, it just changes HWC to CHW
+        frame_tensor = self.visual_transform(frame_resized).unsqueeze(0).to(self.device)
         
         logger.debug(f"[v0] Frame tensor after transform: shape={frame_tensor.shape}, dtype={frame_tensor.dtype}")
         logger.debug(f"[v0] Frame tensor value range: min={frame_tensor.min().item():.4f}, max={frame_tensor.max().item():.4f}, mean={frame_tensor.mean().item():.4f}")
@@ -338,8 +342,7 @@ class VideoInference:
             visual_features = self.visual_extractor(frame_tensor).cpu().numpy().squeeze()  # (1024,)
         
         logger.debug(f"[v0] Visual features: shape={visual_features.shape}, dtype={visual_features.dtype}")
-        logger.debug(f"[v0] Visual features stats: min={visual_features.min():.4f}, max={visual_features.max():.4f}, mean={visual_features.mean():.4f}, std={visual_features.std():.4f}")
-        
+
         # Pose features (128)
         keypoints_flat = keypoints.flatten()[:300]
         keypoints_tensor = torch.from_numpy(keypoints_flat).unsqueeze(0).float().to(self.device)
@@ -427,13 +430,18 @@ class VideoInference:
         
         logger.info(f"Frames procesados: {len(frames)}")
         
-        # Segmentar video en señas
-        keypoints_array = np.array(keypoints_sequence)
-        sign_segments = self.segmenter.segment_signs(keypoints_array)
-        
-        if len(sign_segments) == 0:
-            logger.warning("No se detectaron señas en el video")
-            return []
+        if self.use_segmentation:
+            # Segmentar video en señas
+            keypoints_array = np.array(keypoints_sequence)
+            sign_segments = self.segmenter.segment_signs(keypoints_array)
+            
+            if len(sign_segments) == 0:
+                logger.warning("No se detectaron segmentos. Intentando procesar video completo...")
+                sign_segments = [(0, len(frames))]
+        else:
+            # Procesar video completo como una seña
+            logger.info("Procesando video completo (sin segmentación)")
+            sign_segments = [(0, len(frames))]
         
         # Procesar cada segmento
         sentence = []
@@ -441,7 +449,11 @@ class VideoInference:
         logger.info(f"Procesando {len(sign_segments)} señas detectadas...")
         
         for idx, (start, end) in enumerate(sign_segments, 1):
-            logger.info(f"\nProcesando seña {idx}/{len(sign_segments)} (frames {start}-{end})")
+            segment_length = end - start
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Seña {idx}/{len(sign_segments)}")
+            logger.info(f"  Frames: {start}-{end} (longitud: {segment_length})")
+            logger.info(f"{'='*60}")
             
             # Extraer features para este segmento
             segment_features = []
@@ -454,17 +466,37 @@ class VideoInference:
             
             segment_features = np.array(segment_features)
             
+            logger.info(f"  Features extraídas: shape={segment_features.shape}")
+            logger.info(f"  Features stats: mean={segment_features.mean():.4f}, std={segment_features.std():.4f}")
+            
             # Predecir
             class_id, confidence, top5 = self.predict_sign(segment_features)
             
+            class_name = self.class_names.get(class_id, f"Unknown_{class_id}")
+            
+            logger.info(f"\n  Predicción:")
+            logger.info(f"    Top-1: {class_name} ({confidence:.2%})")
+            logger.info(f"    Top-5:")
+            for rank, (idx, conf) in enumerate(top5[:5], 1):
+                sign_name = self.class_names.get(idx, f"Unknown_{idx}")
+                logger.info(f"      {rank}. {sign_name}: {conf:.2%}")
+            
             if confidence >= self.confidence_threshold:
-                class_name = self.class_names.get(class_id, f"Unknown_{class_id}")
                 sentence.append((class_name, confidence))
-                
-                logger.info(f"  Detectada: {class_name} (confianza: {confidence:.2%})")
-                logger.info(f"  Top-5: {[(self.class_names.get(idx, idx), conf) for idx, conf in top5[:3]]}")
+                logger.info(f"\n  ✓ Seña aceptada (threshold: {self.confidence_threshold:.2%})")
             else:
-                logger.info(f"  Confianza baja ({confidence:.2%}), seña ignorada")
+                logger.warning(f"\n  ✗ Confianza baja ({confidence:.2%} < {self.confidence_threshold:.2%}), seña ignorada")
+        
+        logger.info(f"\n{'='*60}")
+        if sentence:
+            logger.info(f"RESULTADO FINAL: {len(sentence)} señas detectadas")
+            logger.info(f"Oración: {' '.join([sign for sign, _ in sentence])}")
+        else:
+            logger.warning("NO SE DETECTARON SEÑAS en el video")
+            logger.info("Intenta:")
+            logger.info("  1. Reducir --confidence (ej: --confidence 0.01)")
+            logger.info("  2. Usar --no-segmentation para procesar video completo")
+        logger.info(f"{'='*60}\n")
         
         # Guardar resultados si se especifica output
         if output_path:
@@ -503,48 +535,33 @@ def main():
                        help="Ruta para guardar resultados (JSON)")
     parser.add_argument("--device", type=str, default="cuda",
                        help="Device: cuda o cpu (default: cuda)")
-    parser.add_argument("--confidence", type=float, default=0.3,
-                       help="Umbral mínimo de confianza (default: 0.3)")
+    parser.add_argument("--confidence", type=float, default=0.05,  # Reducido threshold por defecto
+                       help="Confidence threshold para aceptar predicciones (default: 0.05)")
+    parser.add_argument("--no-segmentation", action="store_true",  # Nuevo parámetro
+                       help="Procesar video completo sin segmentación automática")
     
     args = parser.parse_args()
     
-    if not args.model.exists():
-        logger.error(f"Modelo no encontrado: {args.model}")
-        return
-    
-    if not args.video.exists():
-        logger.error(f"Video no encontrado: {args.video}")
-        return
-    
-    if not args.metadata.exists():
-        logger.error(f"Metadata no encontrado: {args.metadata}")
-        return
-    
-    # Crear sistema de inferencia
-    inference = VideoInference(
+    # Inicializar sistema
+    inference_system = VideoInference(
         model_path=args.model,
         metadata_path=args.metadata,
         device=args.device,
-        confidence_threshold=args.confidence
+        confidence_threshold=args.confidence,
+        use_segmentation=not args.no_segmentation  # Pasar configuración de segmentación
     )
     
     # Procesar video
-    sentence = inference.process_video(
+    sentence = inference_system.process_video(
         video_path=args.video,
         output_path=args.output
     )
     
-    # Mostrar oración final
+    # Mostrar resultado final
     if sentence:
-        logger.info("\n" + "="*80)
-        logger.info("ORACIÓN DETECTADA:")
-        logger.info(" ".join([sign for sign, _ in sentence]))
-        logger.info("\nDETALLE:")
-        for sign, conf in sentence:
-            logger.info(f"  - {sign} (confianza: {conf:.2%})")
-        logger.info("="*80)
+        print(f"\nOración detectada: {' '.join([sign for sign, _ in sentence])}")
     else:
-        logger.warning("No se detectaron señas en el video")
+        print("\nNo se detectaron señas en el video")
 
 
 if __name__ == "__main__":

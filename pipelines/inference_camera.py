@@ -12,6 +12,7 @@ from typing import List, Tuple, Optional, Dict
 import logging
 import json
 import sys
+from torchvision import transforms
 
 # Agregar el directorio raíz al path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -103,6 +104,14 @@ class CameraInference:
         self.class_names = self._load_class_names(metadata_path)
         self.num_classes = len(self.class_names)
         logger.info(f"Clases cargadas: {self.num_classes}")
+        
+        self.visual_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            )
+        ])
         
         # Cargar extractores
         self.visual_extractor = self._load_visual_extractor()
@@ -257,16 +266,23 @@ class CameraInference:
     
     def extract_features(self, frame: np.ndarray, keypoints: np.ndarray) -> np.ndarray:
         """Extrae features fusionadas (visual + pose) de un frame"""
-        # Visual features
+        # Visual features (1024)
         frame_resized = cv2.resize(frame, (224, 224))
-        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
-        frame_normalized = (frame_rgb.astype(np.float32) / 255.0 - np.array([0.485, 0.456, 0.406])) / np.array([0.229, 0.224, 0.225])
-        frame_tensor = torch.from_numpy(frame_normalized).permute(2, 0, 1).unsqueeze(0).float().to(self.device)
+        
+        # Ensure frame is uint8 in range [0, 255]
+        if frame_resized.dtype != np.uint8:
+            if frame_resized.max() <= 1.0:
+                frame_resized = (frame_resized * 255).astype(np.uint8)
+            else:
+                frame_resized = frame_resized.astype(np.uint8)
+        
+        # Apply the same transform as in training (ToTensor + Normalize)
+        frame_tensor = self.visual_transform(frame_resized).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
             visual_features = self.visual_extractor(frame_tensor).cpu().numpy().squeeze()  # (1024,)
         
-        # Pose features
+        # Pose features (128)
         keypoints_flat = keypoints.flatten()[:300]  # (75, 4) -> (300,)
         keypoints_tensor = torch.from_numpy(keypoints_flat).unsqueeze(0).float().to(self.device)
         
