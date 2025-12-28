@@ -277,7 +277,7 @@ def main():
     # Output
     parser.add_argument('--output_dir', type=str, default='models',
                        help='Directorio para guardar modelos')
-    parser.add_argument('--save_every', type=int, default=5,
+    parser.add_argument('--save_every', type=int, default=15,
                        help='Guardar checkpoint cada N épocas')
     
     args = parser.parse_args()
