@@ -146,7 +146,7 @@ class TrainingConfig:
     # Básico
     num_epochs: int = 100  # Reducido de 200
     batch_size: int = 64   # Reducido de 128 para mejor convergencia
-    num_workers: int = 10
+    num_workers: int = 4
     pin_memory: bool = False
     
     # Optimización

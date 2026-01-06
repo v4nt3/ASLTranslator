@@ -46,10 +46,17 @@ models/
 # DATOS GRANDES
 # ───────────────────────────────
 data/features_fused
+data/features_fused2
 dataset/
 testing/
 data/processed_frames
 data/processed_keypoints
+data/pose/
+data/keypoints/
+data/cnn_pose
+data/features_pose
+data/features_visual
+
 *.csv
 *.tsv
 *.zip

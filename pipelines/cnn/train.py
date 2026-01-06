@@ -4,6 +4,8 @@ OPTIMIZACIONES:
 1. Escaneo único del directorio de features (en lugar de 80k búsquedas individuales)
 2. Lookup en memoria O(1) en lugar de múltiples exists()
 3. Procesamiento por batches para reducir tiempo de carga
+4. Detección automática de dimensiones de features
+5. Modelo adaptable a MLP (128 dims) o CNN (256 dims)
 """
 
 import torch
@@ -31,16 +33,16 @@ logger = logging.getLogger(__name__)
 
 class PoseOnlyTemporalModel(nn.Module):
     """
-    Modelo temporal que usa SOLO pose features (128 dims)
-    Sin visual features de ResNet
+    Modelo temporal que usa pose features
+    Soporta MLP (128 dims) o CNN (256 dims)
     """
     def __init__(
         self,
-        input_dim: int = 128,
+        input_dim: int = 128,  # Ahora configurable, detectado automáticamente
         hidden_dim: int = 256,
         num_layers: int = 2,
         num_classes: int = 2286,
-        dropout: float = 0.5,  # Aumentado de 0.3 a 0.5 para mayor regularización
+        dropout: float = 0.5,
         bidirectional: bool = True
     ):
         super().__init__()
@@ -68,13 +70,13 @@ class PoseOnlyTemporalModel(nn.Module):
         self.classifier = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(lstm_output_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),  # Agregando batch norm
+            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim // 2),  # Capa adicional
+            nn.Linear(hidden_dim, hidden_dim // 2),
             nn.BatchNorm1d(hidden_dim // 2),
             nn.ReLU(),
-            nn.Dropout(dropout * 0.7),  # Dropout final antes de clasificación
+            nn.Dropout(dropout * 0.7),
             nn.Linear(hidden_dim // 2, num_classes)
         )
     
@@ -538,6 +540,45 @@ def create_balanced_dataloaders(
     return train_loader, val_loader, test_loader, num_classes
 
 
+def detect_feature_dimensions(pose_features_dir: Path) -> int:
+    """
+    Detecta automáticamente las dimensiones de las features
+    buscando un archivo .npy y leyendo su forma
+    
+    Returns:
+        int: Dimensión de features (128 para MLP, 256 para CNN)
+    """
+    logger.info("Detectando dimensiones de features...")
+    
+    # Buscar primer archivo .npy disponible
+    npy_files = list(pose_features_dir.glob("*.npy"))
+    
+    if not npy_files:
+        logger.warning("No se encontraron archivos .npy, usando dimensión por defecto 128")
+        return 128
+    
+    # Cargar primer archivo
+    sample_file = npy_files[0]
+    try:
+        sample_features = np.load(sample_file)
+        feature_dim = sample_features.shape[1] if len(sample_features.shape) == 2 else sample_features.shape[0]
+        logger.info(f"✓ Dimensiones detectadas: {feature_dim} (desde {sample_file.name})")
+        
+        # Validar dimensiones esperadas
+        if feature_dim == 128:
+            logger.info("  → Usando features MLP (128 dims)")
+        elif feature_dim == 256:
+            logger.info("  → Usando features CNN (256 dims)")
+        else:
+            logger.warning(f"  → Dimensión inesperada: {feature_dim}, continuando de todas formas")
+        
+        return int(feature_dim)
+    except Exception as e:
+        logger.error(f"Error al leer archivo de muestra: {e}")
+        logger.warning("Usando dimensión por defecto 128")
+        return 128
+
+
 def train_epoch(
     model: nn.Module,
     dataloader: DataLoader,
@@ -629,58 +670,45 @@ def validate(
     return avg_loss, accuracy
 
 
-def main():
-    import argparse
+def train_model(
+    pose_features_dir: Path,
+    metadata_json: Path,
+    output_path: Path,
+    batch_size: int = 32,
+    epochs: int = 100,
+    lr: float = 0.001,
+    device: str = 'cuda',
+    use_amp: bool = True,
+    use_balancing: bool = False  # Por defecto False, el sampler causaba problemas
+):
+    """Entrena el modelo temporal con pose features"""
     
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--pose_features', type=str, required=True)
-    parser.add_argument('--metadata', type=str, required=True)
-    parser.add_argument('--output', type=str, default='outputs/pose_only_model.pth')
-    parser.add_argument('--batch_size', type=int, default=64)  # Reducido de 128 a 64
-    parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--lr', type=float, default=0.0005)  # Reducido de 0.001 a 0.0005
-    parser.add_argument('--num_workers', type=int, default=4)
-    parser.add_argument('--use_amp', action='store_true')
-    parser.add_argument('--use_class_balancing', action='store_true')  # Ahora es opt-in
+    logger.info("=" * 60)
+    logger.info("CARGANDO DATASET CON CORRECCIONES")
+    logger.info("=" * 60)
     
-    args = parser.parse_args()
+    feature_dim = detect_feature_dimensions(pose_features_dir)
     
-    pose_features = Path(args.pose_features)
-    metadata_path = Path(args.metadata)
-    output_path = Path(args.output)
-    batch_size = args.batch_size
-    epochs = args.epochs
-    lr = args.lr
-    num_workers = args.num_workers
-    use_amp = args.use_amp
-    use_balancing = args.use_class_balancing
-    
-    # Device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logger.info(f"Usando device: {device}")
-    logger.info(f"AMP habilitado: {use_amp}")
-    logger.info(f"Balanceo de clases: {use_balancing}")
-    
-    # Load dataloaders
+    # Crear dataloaders con split estratificado
     train_loader, val_loader, test_loader, num_classes = create_balanced_dataloaders(
-        pose_features_dir=pose_features,
-        metadata_path=metadata_path,
+        pose_features_dir=pose_features_dir,
+        metadata_path=metadata_json,
         batch_size=batch_size,
-        num_workers=num_workers,
+        num_workers=config.training.num_workers,
         use_class_balancing=use_balancing
     )
     
-    # Model con regularización mejorada
     model = PoseOnlyTemporalModel(
-        input_dim=128,
+        input_dim=feature_dim,  # Usar dimensión detectada
         hidden_dim=256,
         num_layers=2,
         num_classes=num_classes,
-        dropout=0.5,  # Dropout alto para prevenir overfitting
+        dropout=0.5,
         bidirectional=True
     ).to(device)
     
-    logger.info(f"Modelo creado con {sum(p.numel() for p in model.parameters())} parámetros")
+    logger.info(f"Modelo creado con {sum(p.numel() for p in model.parameters()):,} parámetros")
+    logger.info(f"Input dim: {feature_dim}, Hidden dim: 256, Num classes: {num_classes}")
     
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     
@@ -773,4 +801,46 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--pose_features', type=str, required=True)
+    parser.add_argument('--metadata', type=str, required=True)
+    parser.add_argument('--output', type=str, default='outputs/pose_only_model.pth')
+    parser.add_argument('--batch_size', type=int, default=64)  # Reducido de 128 a 32
+    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--num_workers', type=int, default=config.training.num_workers)
+    parser.add_argument('--use_amp', action='store_true')
+    parser.add_argument('--use_class_balancing', action='store_true')  # Ahora es opt-in
+    
+    args = parser.parse_args()
+    
+    pose_features = Path(args.pose_features)
+    metadata_path = Path(args.metadata)
+    output_path = Path(args.output)
+    batch_size = args.batch_size
+    epochs = args.epochs
+    lr = args.lr
+    num_workers = args.num_workers
+    use_amp = args.use_amp
+    use_balancing = args.use_class_balancing
+    
+    # Device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    logger.info(f"Usando device: {device}")
+    logger.info(f"AMP habilitado: {use_amp}")
+    logger.info(f"Balanceo de clases: {use_balancing}")
+    
+    # Train model
+    train_model(
+        pose_features_dir=pose_features,
+        metadata_json=metadata_path,
+        output_path=output_path,
+        batch_size=batch_size,
+        epochs=epochs,
+        lr=lr,
+        device=device,
+        use_amp=use_amp,
+        use_balancing=use_balancing
+    )
