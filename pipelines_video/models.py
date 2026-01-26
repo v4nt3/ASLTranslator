@@ -199,16 +199,18 @@ class VideoLSTMClassifier(nn.Module):
             self.attention = TemporalAttention(lstm_output_dim, dropout=self.dropout)
         
         # CORREGIDO: Clasificador con capas intermedias
-        self.classifier = nn.Sequential(
-            nn.LayerNorm(lstm_output_dim),
-            nn.Linear(lstm_output_dim, self.classifier_hidden_dim),
-            nn.GELU(),
-            nn.Dropout(self.classifier_dropout),
-            nn.Linear(self.classifier_hidden_dim, self.classifier_hidden_dim // 2),
-            nn.GELU(),
-            nn.Dropout(self.classifier_dropout * 0.5),  # Menos dropout en capa final
-            nn.Linear(self.classifier_hidden_dim // 2, self.num_classes)
-        )
+        # self.classifier = nn.Sequential(
+        #     nn.LayerNorm(lstm_output_dim),
+        #     nn.Linear(lstm_output_dim, self.classifier_hidden_dim),
+        #     nn.GELU(),
+        #     nn.Dropout(self.classifier_dropout),
+        #     nn.Linear(self.classifier_hidden_dim, self.classifier_hidden_dim // 2),
+        #     nn.GELU(),
+        #     nn.Dropout(self.classifier_dropout * 0.5),  # Menos dropout en capa final
+        #     nn.Linear(self.classifier_hidden_dim // 2, self.num_classes)
+        # )
+        
+        self.classifier = nn.Sequential(nn.Linear(lstm_output_dim, self.num_classes))
         
         # Inicializacion de pesos
         self._init_weights()
