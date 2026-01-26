@@ -29,6 +29,11 @@ def setup_logging(checkpoint_dir: Path) -> logging.Logger:
     log_file = checkpoint_dir / "training.log"
     
     logger = logging.getLogger("video_trainer")
+    
+    # Evitar duplicacion: no propagar al root logger
+    logger.propagate = False
+    
+    # Limpiar handlers existentes para evitar duplicados si se llama multiples veces
     logger.handlers.clear()
     
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
