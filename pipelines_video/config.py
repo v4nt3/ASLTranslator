@@ -53,7 +53,7 @@ class ModelConfig:
 class TrainingConfig:
     """Configuracion de entrenamiento"""
     batch_size: int = 64
-    learning_rate: float = 5e-4  # CORREGIDO: Reducido de 1e-3 a 5e-4 para estabilidad
+    learning_rate: float = 3e-4  # CORREGIDO: Reducido de 1e-3 a 5e-4 para estabilidad
     weight_decay: float = 1e-4   # CORREGIDO: Aumentado de 1e-5 a 1e-4
     num_epochs: int = 100
     num_workers: int = 10
