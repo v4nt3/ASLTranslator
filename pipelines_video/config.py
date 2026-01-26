@@ -1,5 +1,6 @@
 """
 Configuracion para el pipeline de videos completos (sin clips)
+CORREGIDO: Class weights habilitados, focal loss activo, label smoothing reducido
 """
 
 from dataclasses import dataclass, field
@@ -39,37 +40,56 @@ class ModelConfig:
     num_classes: int = 2286
     hidden_dim: int = 512
     num_layers: int = 2
-    dropout: float = 0.3
+    dropout: float = 0.4  # CORREGIDO: Aumentado de 0.3 a 0.4
     bidirectional: bool = True
     use_attention: bool = True
+    
+    # NUEVO: Configuracion del clasificador
+    classifier_hidden_dim: int = 512  # Capa intermedia en clasificador
+    classifier_dropout: float = 0.4
 
 
 @dataclass
 class TrainingConfig:
     """Configuracion de entrenamiento"""
     batch_size: int = 64
-    learning_rate: float = 3e-4
-    weight_decay: float = 1e-5
+    learning_rate: float = 5e-4  # CORREGIDO: Reducido de 1e-3 a 5e-4 para estabilidad
+    weight_decay: float = 1e-4   # CORREGIDO: Aumentado de 1e-5 a 1e-4
     num_epochs: int = 100
     num_workers: int = 10
     device: str = "cuda"
     use_amp: bool = True
     
-    # Class balancing
-    use_class_weights: bool = False
-    focal_loss_gamma: float = 0  # 0 = CrossEntropy, >0 = FocalLoss
+    # Class balancing - CORREGIDO: Habilitados por defecto
+    use_class_weights: bool = True  # CORREGIDO: Era False
+    focal_loss_gamma: float = 2.0   # CORREGIDO: Era 0, ahora activa Focal Loss
+    class_weight_smoothing: float = 0.05  # CORREGIDO: Reducido de 0.1 a 0.05
     
-    # Scheduler
+    # Scheduler - CORREGIDO: Ahora monitorea accuracy
     scheduler_type: str = "plateau"  # "plateau", "onecycle", "cosine"
     scheduler_patience: int = 5
     scheduler_factor: float = 0.5
     scheduler_min_lr: float = 1e-6
+    scheduler_monitor: str = "accuracy"  # NUEVO: "accuracy" o "loss"
     
     # Early stopping
     early_stopping_patience: int = 15
     
-    # Label smoothing
-    label_smoothing: float = 0.1
+    # Label smoothing - CORREGIDO: Reducido para no diluir class weights
+    label_smoothing: float = 0.05  # CORREGIDO: Era 0.1
+    
+    # Gradient clipping - CORREGIDO: Menos agresivo
+    max_grad_norm: float = 2.0  # CORREGIDO: Era 1.0
+    
+    # Data augmentation - NUEVO
+    use_augmentation: bool = True
+    augmentation_config: dict = field(default_factory=lambda: {
+        "time_warp_prob": 0.3,
+        "time_mask_prob": 0.3,
+        "feature_dropout_prob": 0.2,
+        "noise_std": 0.03,  # Reducido para más estabilidad
+        "speed_change_range": (0.85, 1.15)  # Rango más conservador
+    })
 
 
 @dataclass

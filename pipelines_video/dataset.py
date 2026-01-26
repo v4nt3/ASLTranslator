@@ -1,9 +1,6 @@
 """
 Dataset para videos completos con longitud variable.
-Incluye:
-- Carga de features precomputadas
-- Padding dinamico por batch
-- Calculo de class weights para balanceo
+CORREGIDO: Augmentation habilitado en training, smoothing reducido en class weights
 """
 
 import torch  # type: ignore
@@ -31,8 +28,8 @@ class TemporalAugmentation:
         time_warp_prob: float = 0.3,
         time_mask_prob: float = 0.3,
         feature_dropout_prob: float = 0.2,
-        noise_std: float = 0.05,
-        speed_change_range: Tuple[float, float] = (0.8, 1.2)
+        noise_std: float = 0.03,  # CORREGIDO: Reducido de 0.05
+        speed_change_range: Tuple[float, float] = (0.85, 1.15)  # CORREGIDO: Rango mas conservador
     ):
         self.time_warp_prob = time_warp_prob
         self.time_mask_prob = time_mask_prob
@@ -95,8 +92,8 @@ class TemporalAugmentation:
         """Oculta un segmento temporal con ceros o media"""
         T, D = features.shape
         
-        # Longitud del mask (10-30% de la secuencia)
-        mask_len = np.random.randint(1, max(2, int(T * 0.3)))
+        # Longitud del mask (10-20% de la secuencia) - CORREGIDO: Reducido
+        mask_len = np.random.randint(1, max(2, int(T * 0.2)))
         mask_start = np.random.randint(0, max(1, T - mask_len))
         
         # Reemplazar con media de la secuencia (mejor que ceros)
@@ -109,8 +106,8 @@ class TemporalAugmentation:
         """Dropout aleatorio de dimensiones de features"""
         T, D = features.shape
         
-        # Dropout de 10-20% de dimensiones
-        dropout_ratio = np.random.uniform(0.1, 0.2)
+        # Dropout de 5-15% de dimensiones - CORREGIDO: Reducido
+        dropout_ratio = np.random.uniform(0.05, 0.15)
         num_dropout = int(D * dropout_ratio)
         
         dropout_dims = np.random.choice(D, num_dropout, replace=False)
@@ -149,9 +146,9 @@ class VideoFeaturesDataset(Dataset):
         self.max_length = max_length
         self.augment = augment
         
-        # Augmentation
+        # Augmentation - CORREGIDO: Usar config por defecto si no se especifica
         if augment:
-            aug_config = augmentation_config or {}
+            aug_config = augmentation_config or config.training.augmentation_config
             self.augmenter = TemporalAugmentation(**aug_config)
         else:
             self.augmenter = None
@@ -162,7 +159,7 @@ class VideoFeaturesDataset(Dataset):
         logger.info(f"VideoFeaturesDataset: {len(self)} videos")
         logger.info(f"  Longitudes: min={self.min_length}, max={self.max_length_found}, "
                    f"mean={self.mean_length:.1f}")
-        logger.info(f"  Augmentation: {'enabled' if augment else 'disabled'}")
+        logger.info(f"  Augmentation: {'ENABLED' if augment else 'disabled'}")
     
     def _compute_length_stats(self):
         """Calcula estadisticas de longitud de secuencias"""
@@ -359,6 +356,9 @@ def load_video_data_from_folder(
         train_end = int(n * train_split)
         val_end = int(n * (train_split + val_split))
         
+        # CORREGIDO: Asegurar al menos 1 muestra en train para clases con pocas muestras
+        train_end = max(1, train_end)
+        
         train_data.extend(samples[:train_end])
         val_data.extend(samples[train_end:val_end])
         test_data.extend(samples[val_end:])
@@ -379,7 +379,7 @@ def load_video_data_from_folder(
 def compute_class_weights(
     class_counts: Dict[int, int],
     num_classes: int,
-    smoothing: float = 0.1
+    smoothing: float = None  # CORREGIDO: Usar config por defecto
 ) -> torch.Tensor:
     """
     Calcula pesos por clase para CrossEntropyLoss.
@@ -390,11 +390,14 @@ def compute_class_weights(
     Args:
         class_counts: {class_id: count}
         num_classes: Numero total de clases
-        smoothing: Factor de suavizado (0-1)
+        smoothing: Factor de suavizado (0-1), por defecto usa config
     
     Returns:
         weights: Tensor (num_classes,)
     """
+    if smoothing is None:
+        smoothing = config.training.class_weight_smoothing  # CORREGIDO: Usa 0.05 en lugar de 0.1
+    
     total_samples = sum(class_counts.values())
     
     weights = torch.ones(num_classes, dtype=torch.float32)
@@ -406,11 +409,14 @@ def compute_class_weights(
             # Aplicar smoothing: weight = (1-s) * weight + s * 1.0
             weights[class_id] = (1 - smoothing) * weight + smoothing
     
+    # CORREGIDO: Clip para evitar valores extremos
+    weights = torch.clamp(weights, min=0.1, max=10.0)
+    
     # Normalizar para que la media sea 1
     weights = weights / weights.mean()
     
     logger.info(f"Class weights: min={weights.min():.2f}, max={weights.max():.2f}, "
-               f"mean={weights.mean():.2f}")
+               f"mean={weights.mean():.2f}, smoothing={smoothing}")
     
     return weights
 
@@ -424,10 +430,13 @@ def create_video_dataloaders(
     train_split: float = 0.7,
     val_split: float = 0.15,
     random_seed: int = 42,
-    use_weighted_sampler: bool = False
+    use_weighted_sampler: bool = False,
+    use_augmentation: bool = None  # NUEVO: Parametro explicito
 ) -> Tuple[DataLoader, DataLoader, DataLoader, Optional[torch.Tensor]]:
     """
     Crea DataLoaders para videos completos.
+    
+    CORREGIDO: Augmentation habilitado por defecto en training
     
     Returns:
         train_loader, val_loader, test_loader, class_weights
@@ -440,6 +449,8 @@ def create_video_dataloaders(
         batch_size = config.training.batch_size
     if num_workers is None:
         num_workers = config.training.num_workers
+    if use_augmentation is None:
+        use_augmentation = config.training.use_augmentation  # CORREGIDO: True por defecto
     
     # Cargar datos
     train_data, val_data, test_data, class_counts = load_video_data_from_folder(
@@ -460,10 +471,16 @@ def create_video_dataloaders(
     test_paths = [item[0] for item in test_data]
     test_class_ids = [item[1] for item in test_data]
     
-    # Crear datasets
-    train_dataset = VideoFeaturesDataset(train_paths, train_class_ids, max_length)
-    val_dataset = VideoFeaturesDataset(val_paths, val_class_ids, max_length)
-    test_dataset = VideoFeaturesDataset(test_paths, test_class_ids, max_length)
+    # CORREGIDO: Crear datasets con augmentation habilitado en training
+    train_dataset = VideoFeaturesDataset(
+        train_paths, 
+        train_class_ids, 
+        max_length,
+        augment=use_augmentation,  # CORREGIDO: Habilitado!
+        augmentation_config=config.training.augmentation_config
+    )
+    val_dataset = VideoFeaturesDataset(val_paths, val_class_ids, max_length, augment=False)
+    test_dataset = VideoFeaturesDataset(test_paths, test_class_ids, max_length, augment=False)
     
     # Calcular class weights
     class_weights = compute_class_weights(
@@ -519,7 +536,7 @@ def create_video_dataloaders(
     )
     
     logger.info(f"DataLoaders creados:")
-    logger.info(f"  Train: {len(train_loader)} batches ({len(train_dataset)} videos)")
+    logger.info(f"  Train: {len(train_loader)} batches ({len(train_dataset)} videos) - Augmentation: {use_augmentation}")
     logger.info(f"  Val: {len(val_loader)} batches ({len(val_dataset)} videos)")
     logger.info(f"  Test: {len(test_loader)} batches ({len(test_dataset)} videos)")
     

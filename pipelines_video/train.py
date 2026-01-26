@@ -1,10 +1,6 @@
 """
 Script de entrenamiento para modelo de videos completos.
-Incluye:
-- Class balancing con weighted loss o focal loss
-- Gradient accumulation para secuencias largas
-- Mixed precision training
-- Early stopping y checkpointing
+CORREGIDO: Scheduler sincronizado con accuracy, gradient clipping ajustado
 """
 
 import torch  # type: ignore
@@ -71,7 +67,8 @@ class VideoTrainer:
         use_attention: bool = True,
         class_weights: Optional[torch.Tensor] = None,
         focal_gamma: float = None,
-        gradient_accumulation_steps: int = 1
+        gradient_accumulation_steps: int = 1,
+        max_grad_norm: float = None  # NUEVO
     ):
         # Defaults
         if num_classes is None:
@@ -90,6 +87,8 @@ class VideoTrainer:
             checkpoint_dir = config.model_paths.checkpoints
         if focal_gamma is None:
             focal_gamma = config.training.focal_loss_gamma
+        if max_grad_norm is None:
+            max_grad_norm = config.training.max_grad_norm  # CORREGIDO: Usa 2.0
         
         self.num_epochs = num_epochs
         self.num_classes = num_classes
@@ -97,6 +96,7 @@ class VideoTrainer:
         self.use_amp = use_amp
         self.checkpoint_dir = Path(checkpoint_dir)
         self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.max_grad_norm = max_grad_norm  # NUEVO
         
         # Logger
         self.logger = setup_logging(self.checkpoint_dir)
@@ -112,11 +112,12 @@ class VideoTrainer:
             use_attention=use_attention
         ).to(self.device)
         
-        # Optimizer
-        self.optimizer = optim.Adam(
+        # CORREGIDO: AdamW en lugar de Adam para mejor regularizacion
+        self.optimizer = optim.AdamW(
             self.model.parameters(),
             lr=learning_rate,
-            weight_decay=weight_decay
+            weight_decay=weight_decay,
+            betas=(0.9, 0.999)
         )
         
         # Loss con class weights
@@ -129,7 +130,7 @@ class VideoTrainer:
             label_smoothing=config.training.label_smoothing
         )
         
-        # Scheduler
+        # Scheduler - CORREGIDO: Configuracion basada en config
         self._setup_scheduler()
         
         # AMP
@@ -147,6 +148,7 @@ class VideoTrainer:
         }
         
         self.best_val_acc = 0.0
+        self.best_val_loss = float('inf')
         
         # Logging
         self.logger.info("="*60)
@@ -161,39 +163,70 @@ class VideoTrainer:
         self.logger.info(f"  Use attention: {use_attention}")
         self.logger.info(f"  Use AMP: {use_amp}")
         self.logger.info(f"  Gradient accumulation: {gradient_accumulation_steps}")
+        self.logger.info(f"  Max grad norm: {max_grad_norm}")
         self.logger.info(f"  Class weights: {'enabled' if class_weights is not None else 'disabled'}")
+        self.logger.info(f"  Scheduler monitor: {config.training.scheduler_monitor}")
         self.logger.info("="*60)
     
     def _setup_scheduler(self):
-        """Configura el scheduler segun config"""
+        """Configura el scheduler segun config - CORREGIDO"""
         scheduler_type = config.training.scheduler_type
+        scheduler_monitor = config.training.scheduler_monitor
         
         if scheduler_type == "plateau":
+            # CORREGIDO: Puede monitorear accuracy o loss
+            mode = 'max' if scheduler_monitor == 'accuracy' else 'min'
             self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
                 self.optimizer,
-                mode='min',
+                mode=mode,  # CORREGIDO: 'max' para accuracy
                 factor=config.training.scheduler_factor,
                 patience=config.training.scheduler_patience,
-                min_lr=config.training.scheduler_min_lr
+                min_lr=config.training.scheduler_min_lr,
+                verbose=True
             )
             self.scheduler_type = "plateau"
+            self.scheduler_monitor = scheduler_monitor
         elif scheduler_type == "cosine":
-            self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            self.scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
                 self.optimizer,
-                T_max=self.num_epochs,
+                T_0=10,  # Restart cada 10 epochs
+                T_mult=2,
                 eta_min=config.training.scheduler_min_lr
             )
             self.scheduler_type = "cosine"
+            self.scheduler_monitor = None
+        elif scheduler_type == "onecycle":
+            # OneCycleLR requiere conocer steps totales
+            self.scheduler = None
+            self.scheduler_type = "onecycle"
+            self.scheduler_monitor = None
         else:
             self.scheduler = None
             self.scheduler_type = None
+            self.scheduler_monitor = None
         
-        self.logger.info(f"Scheduler: {scheduler_type}")
+        self.logger.info(f"Scheduler: {scheduler_type}, monitor: {scheduler_monitor}")
+    
+    def _setup_onecycle_scheduler(self, steps_per_epoch: int):
+        """Configura OneCycleLR despues de conocer los steps"""
+        if self.scheduler_type == "onecycle" and self.scheduler is None:
+            total_steps = steps_per_epoch * self.num_epochs
+            self.scheduler = optim.lr_scheduler.OneCycleLR(
+                self.optimizer,
+                max_lr=config.training.learning_rate * 10,
+                total_steps=total_steps,
+                pct_start=0.1,
+                anneal_strategy='cos'
+            )
+            self.logger.info(f"OneCycleLR configurado con {total_steps} steps")
     
     def train(self, train_loader, val_loader):
         """Loop de entrenamiento principal"""
         self.logger.info(f"\nIniciando entrenamiento por {self.num_epochs} epochs")
         self.logger.info(f"Train batches: {len(train_loader)}, Val batches: {len(val_loader)}\n")
+        
+        # Setup OneCycle si es necesario
+        self._setup_onecycle_scheduler(len(train_loader))
         
         patience_counter = 0
         
@@ -208,11 +241,13 @@ class VideoTrainer:
             # Validate
             val_loss, val_acc, val_top5 = self._validate(val_loader)
             
-            # Scheduler step
+            # CORREGIDO: Scheduler step basado en metrica configurada
             if self.scheduler_type == "plateau":
-                self.scheduler.step(val_loss)
+                metric = val_acc if self.scheduler_monitor == 'accuracy' else val_loss
+                self.scheduler.step(metric)
             elif self.scheduler_type == "cosine":
                 self.scheduler.step()
+            # OneCycle hace step en cada batch, no por epoch
             
             # Update history
             self.history['train_loss'].append(train_loss)
@@ -229,13 +264,22 @@ class VideoTrainer:
             self.logger.info(f"  LR: {self.optimizer.param_groups[0]['lr']:.2e}")
             self.logger.info(f"  Patience: {patience_counter}/{config.training.early_stopping_patience}")
             
-            # Save best model
+            # Save best model - BASADO EN ACCURACY
+            improved = False
             if val_acc > self.best_val_acc:
                 self.best_val_acc = val_acc
                 self._save_checkpoint("best_model.pt", epoch, val_acc)
                 self.logger.info(f"  >>> New best model! Accuracy: {val_acc:.4f}")
+                improved = True
                 patience_counter = 0
-            else:
+            
+            # Tambien guardar si mejora loss significativamente (backup)
+            if val_loss < self.best_val_loss * 0.99:  # 1% mejora
+                self.best_val_loss = val_loss
+                if not improved:
+                    self._save_checkpoint("best_loss_model.pt", epoch, val_acc)
+            
+            if not improved:
                 patience_counter += 1
             
             # Checkpoint periodico
@@ -290,10 +334,18 @@ class VideoTrainer:
                     
                     if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
                         self.scaler.unscale_(self.optimizer)
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                        # CORREGIDO: Usar max_grad_norm configurable
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), 
+                            self.max_grad_norm
+                        )
                         self.scaler.step(self.optimizer)
                         self.scaler.update()
                         self.optimizer.zero_grad()
+                        
+                        # OneCycle step por batch
+                        if self.scheduler_type == "onecycle" and self.scheduler is not None:
+                            self.scheduler.step()
                 else:
                     logits = self.model(features, lengths)
                     loss = self.criterion(logits, targets)
@@ -301,9 +353,17 @@ class VideoTrainer:
                     loss.backward()
                     
                     if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                        # CORREGIDO: Usar max_grad_norm configurable
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), 
+                            self.max_grad_norm
+                        )
                         self.optimizer.step()
                         self.optimizer.zero_grad()
+                        
+                        # OneCycle step por batch
+                        if self.scheduler_type == "onecycle" and self.scheduler is not None:
+                            self.scheduler.step()
                 
                 total_loss += loss.item() * self.gradient_accumulation_steps
                 
@@ -387,7 +447,8 @@ class VideoTrainer:
                 'hidden_dim': config.model.hidden_dim,
                 'num_layers': config.model.num_layers,
                 'bidirectional': config.model.bidirectional,
-                'use_attention': config.model.use_attention
+                'use_attention': config.model.use_attention,
+                'classifier_hidden_dim': config.model.classifier_hidden_dim
             }
         }, checkpoint_path)
 
@@ -419,13 +480,18 @@ def main():
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--no_amp", action="store_true")
     
-    # Class balancing
-    parser.add_argument("--use_class_weights", action="store_true", default=True)
+    # Class balancing - CORREGIDO: Defaults coherentes con config
+    parser.add_argument("--use_class_weights", action="store_true", 
+                        default=config.training.use_class_weights)  # True por defecto
     parser.add_argument("--no_class_weights", dest="use_class_weights", action="store_false")
     parser.add_argument("--focal_gamma", type=float, default=None,
                         help="Gamma para FocalLoss (0 = CrossEntropy)")
     parser.add_argument("--use_weighted_sampler", action="store_true",
                         help="Usar WeightedRandomSampler en lugar de weighted loss")
+    
+    # Augmentation
+    parser.add_argument("--no_augmentation", action="store_true",
+                        help="Deshabilitar data augmentation")
     
     # Gradient accumulation
     parser.add_argument("--gradient_accumulation", type=int, default=1)
@@ -438,6 +504,7 @@ def main():
     checkpoint_dir = args.checkpoint_dir or config.model_paths.checkpoints
     batch_size = args.batch_size or config.training.batch_size
     num_workers = args.num_workers or config.training.num_workers
+    use_augmentation = not args.no_augmentation
     
     print("="*60)
     print("ENTRENAMIENTO DE MODELO DE VIDEO COMPLETO")
@@ -449,15 +516,18 @@ def main():
     print(f"Batch size: {batch_size}")
     print(f"Use class weights: {args.use_class_weights}")
     print(f"Focal gamma: {args.focal_gamma or config.training.focal_loss_gamma}")
+    print(f"Use augmentation: {use_augmentation}")
+    print(f"Scheduler monitor: {config.training.scheduler_monitor}")
     print("="*60 + "\n")
     
-    # Create dataloaders
+    # Create dataloaders - CORREGIDO: Con augmentation
     train_loader, val_loader, test_loader, class_weights = create_video_dataloaders(
         features_dir=features_dir,
         metadata_path=metadata_path,
         batch_size=batch_size,
         num_workers=num_workers,
-        use_weighted_sampler=args.use_weighted_sampler
+        use_weighted_sampler=args.use_weighted_sampler,
+        use_augmentation=use_augmentation  # NUEVO
     )
     
     # Class weights for loss

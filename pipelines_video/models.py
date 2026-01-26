@@ -1,9 +1,6 @@
 """
 Modelos temporales para videos de longitud variable.
-Incluye:
-- LSTM bidireccional con attention y masking
-- Focal Loss para class imbalance
-- Soporte para secuencias de longitud variable
+CORREGIDO: Clasificador con capas intermedias, mejor arquitectura
 """
 
 import torch  # type: ignore
@@ -86,15 +83,17 @@ class TemporalAttention(nn.Module):
     """
     Modulo de attention temporal con soporte para masking.
     Aprende a ponderar frames segun su relevancia.
+    CORREGIDO: Agregado LayerNorm para estabilidad
     """
     
     def __init__(self, hidden_dim: int, dropout: float = 0.1):
         super().__init__()
+        self.layer_norm = nn.LayerNorm(hidden_dim)  # NUEVO
         self.attention = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim // 2),  # CORREGIDO: Bottleneck
             nn.Tanh(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1)
+            nn.Linear(hidden_dim // 2, 1)
         )
     
     def forward(
@@ -112,8 +111,11 @@ class TemporalAttention(nn.Module):
         """
         B, T, H = lstm_output.shape
         
+        # Layer norm para estabilidad
+        normalized = self.layer_norm(lstm_output)
+        
         # Calcular scores de attention
-        attention_scores = self.attention(lstm_output)  # (B, T, 1)
+        attention_scores = self.attention(normalized)  # (B, T, 1)
         
         # Crear mascara para padding
         if lengths is not None:
@@ -138,11 +140,10 @@ class VideoLSTMClassifier(nn.Module):
     """
     Clasificador LSTM bidireccional para videos de longitud variable.
     
-    Caracteristicas:
-    - LSTM bidireccional con multiples capas
-    - Attention temporal con masking correcto
-    - Soporte para pack_padded_sequence
-    - NO asume longitud fija de secuencia
+    CORREGIDO:
+    - Clasificador con capas intermedias (no solo 1 capa lineal)
+    - Mejor regularizacion
+    - Layer normalization
     """
     
     def __init__(
@@ -153,7 +154,9 @@ class VideoLSTMClassifier(nn.Module):
         num_classes: int = None,
         dropout: float = None,
         bidirectional: bool = None,
-        use_attention: bool = None
+        use_attention: bool = None,
+        classifier_hidden_dim: int = None,  # NUEVO
+        classifier_dropout: float = None     # NUEVO
     ):
         super().__init__()
         
@@ -166,11 +169,15 @@ class VideoLSTMClassifier(nn.Module):
         self.bidirectional = bidirectional if bidirectional is not None else config.model.bidirectional
         self.use_attention = use_attention if use_attention is not None else config.model.use_attention
         
-        # Input projection (opcional, para reducir dimension)
+        # NUEVO: Config del clasificador
+        self.classifier_hidden_dim = classifier_hidden_dim or config.model.classifier_hidden_dim
+        self.classifier_dropout = classifier_dropout or config.model.classifier_dropout
+        
+        # Input projection con LayerNorm
         self.input_projection = nn.Sequential(
             nn.Linear(self.input_dim, self.hidden_dim),
             nn.LayerNorm(self.hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),  # CORREGIDO: GELU en lugar de ReLU
             nn.Dropout(self.dropout)
         )
         
@@ -191,12 +198,20 @@ class VideoLSTMClassifier(nn.Module):
         if self.use_attention:
             self.attention = TemporalAttention(lstm_output_dim, dropout=self.dropout)
         
-        # Clasificador
+        # CORREGIDO: Clasificador con capas intermedias
         self.classifier = nn.Sequential(
             nn.LayerNorm(lstm_output_dim),
-            nn.Dropout(self.dropout),
-            nn.Linear(lstm_output_dim, self.num_classes)
+            nn.Linear(lstm_output_dim, self.classifier_hidden_dim),
+            nn.GELU(),
+            nn.Dropout(self.classifier_dropout),
+            nn.Linear(self.classifier_hidden_dim, self.classifier_hidden_dim // 2),
+            nn.GELU(),
+            nn.Dropout(self.classifier_dropout * 0.5),  # Menos dropout en capa final
+            nn.Linear(self.classifier_hidden_dim // 2, self.num_classes)
         )
+        
+        # Inicializacion de pesos
+        self._init_weights()
         
         # Logging
         logger.info(f"VideoLSTMClassifier inicializado:")
@@ -205,7 +220,16 @@ class VideoLSTMClassifier(nn.Module):
         logger.info(f"  Num layers: {self.num_layers}")
         logger.info(f"  Bidirectional: {self.bidirectional}")
         logger.info(f"  Use attention: {self.use_attention}")
+        logger.info(f"  Classifier hidden: {self.classifier_hidden_dim}")
         logger.info(f"  Num classes: {self.num_classes}")
+    
+    def _init_weights(self):
+        """Inicializacion de pesos para mejor convergencia"""
+        for name, param in self.named_parameters():
+            if 'weight' in name and param.dim() >= 2:
+                nn.init.xavier_uniform_(param)
+            elif 'bias' in name:
+                nn.init.zeros_(param)
     
     def forward(
         self, 
@@ -313,11 +337,13 @@ class VideoTransformerClassifier(nn.Module):
         # CLS token para clasificacion
         self.cls_token = nn.Parameter(torch.randn(1, 1, self.hidden_dim))
         
-        # Clasificador
+        # CORREGIDO: Clasificador mejorado
         self.classifier = nn.Sequential(
             nn.LayerNorm(self.hidden_dim),
+            nn.Linear(self.hidden_dim, self.hidden_dim // 2),
+            nn.GELU(),
             nn.Dropout(self.dropout),
-            nn.Linear(self.hidden_dim, self.num_classes)
+            nn.Linear(self.hidden_dim // 2, self.num_classes)
         )
         
         logger.info(f"VideoTransformerClassifier inicializado:")
@@ -424,14 +450,14 @@ def get_loss_function(
         label_smoothing = config.training.label_smoothing
     
     if focal_gamma > 0:
-        logger.info(f"Usando FocalLoss con gamma={focal_gamma}")
+        logger.info(f"Usando FocalLoss con gamma={focal_gamma}, smoothing={label_smoothing}")
         return FocalLoss(
             weight=class_weights,
             gamma=focal_gamma,
             label_smoothing=label_smoothing
         )
     else:
-        logger.info("Usando CrossEntropyLoss")
+        logger.info(f"Usando CrossEntropyLoss con smoothing={label_smoothing}")
         return nn.CrossEntropyLoss(
             weight=class_weights,
             label_smoothing=label_smoothing
