@@ -151,22 +151,9 @@ def save_extractors(output_dir: Path):
     with open(metadata_path, 'w') as f:
         json.dump(metadata, f, indent=2)
     logger.info(f"✓ Metadata guardada: {metadata_path}")
-    
-    logger.info("\n" + "="*80)
-    logger.info("✓ EXTRACTORES GUARDADOS EXITOSAMENTE")
-    logger.info("="*80)
-    logger.info("\nArchivos creados:")
-    logger.info(f"   {output_dir}/")
-    logger.info(f"     ├── visual_extractor_full.pt (modelo completo)")
-    logger.info(f"     ├── visual_extractor_state.pt (solo pesos)")
-    logger.info(f"     ├── pose_extractor_full.pt (modelo completo)")
-    logger.info(f"     ├── pose_extractor_state.pt (solo pesos)")
-    logger.info(f"     └── extractors_metadata.json (información)")
-    logger.info("\n IMPORTANTE:")
-    logger.info("     Estos extractores deben usarse en:")
-    logger.info("     1. Preprocessing (precompute_*.py)")
-    logger.info("     2. Inferencia (inference_*.py)")
-    logger.info("="*80)
+
+    logger.info("EXTRACTORES GUARDADOS EXITOSAMENTE")
+  
 
 
 if __name__ == "__main__":

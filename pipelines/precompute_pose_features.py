@@ -32,7 +32,7 @@ def load_pose_extractor(extractor_path: Path, device: str):
         extractor = torch.load(extractor_path, map_location=device)
         logger.info("✓ Extractor cargado (modelo completo)")
     except:
-        from pipelines.save_extractors import PoseFeatureExtractor
+        from pipelines_video.save_extractors import PoseFeatureExtractor
         extractor = PoseFeatureExtractor()
         extractor.load_state_dict(torch.load(extractor_path, map_location=device))
         extractor.to(device)

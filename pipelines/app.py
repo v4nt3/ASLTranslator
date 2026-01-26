@@ -20,8 +20,8 @@ from torchvision import transforms #type: ignore
 from tqdm import tqdm #type: ignore
 
 from pipelines.models_temporal import TemporalLSTMClassifier
-from pipelines.save_extractors import ResNet101FeatureExtractor
-from pipelines.save_extractors import PoseFeatureExtractor  
+from pipelines_video.save_extractors import ResNet101FeatureExtractor
+from pipelines_video.save_extractors import PoseFeatureExtractor  
 
 logging.basicConfig(
     level=logging.INFO,

@@ -11,7 +11,7 @@ import sys
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from pipelines.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
+from pipelines_video.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
 from torchvision import transforms
 
 logging.basicConfig(level=logging.DEBUG)

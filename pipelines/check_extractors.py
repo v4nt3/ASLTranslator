@@ -8,7 +8,7 @@ from pathlib import Path
 import logging
 import argparse
 import json
-from pipelines.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
+from pipelines_video.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
 
 logging.basicConfig(
     level=logging.INFO,

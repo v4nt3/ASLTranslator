@@ -9,7 +9,7 @@ from pathlib import Path
 from tqdm import tqdm #type: ignore
 import logging
 from torchvision import transforms #type: ignore
-from pipelines.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
+from pipelines_video.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
 
 from config import config
 

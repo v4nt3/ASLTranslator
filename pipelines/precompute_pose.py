@@ -9,7 +9,7 @@ from pathlib import Path
 from tqdm import tqdm
 import logging
 import argparse
-from pipelines.save_extractors import PoseFeatureExtractor
+from pipelines_video.save_extractors import PoseFeatureExtractor
 
 logging.basicConfig(
     level=logging.INFO,

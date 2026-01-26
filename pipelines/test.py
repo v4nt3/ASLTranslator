@@ -10,7 +10,7 @@ import logging
 from pipelines.inference import ASLInferenceFixed
 from pipelines.data_preparation import KeypointExtractor, FrameExtractor
 from config import config
-from pipelines.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
+from pipelines_video.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

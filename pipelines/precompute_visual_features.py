@@ -36,7 +36,7 @@ def load_visual_extractor(extractor_path: Path, device: str):
         logger.info("✓ Extractor cargado (modelo completo)")
     except:
         # Si falla, cargar state_dict
-        from pipelines.save_extractors import ResNet101FeatureExtractor
+        from pipelines_video.save_extractors import ResNet101FeatureExtractor
         extractor = ResNet101FeatureExtractor(output_dim=1024)
         extractor.load_state_dict(torch.load(extractor_path, map_location=device))
         extractor.to(device)

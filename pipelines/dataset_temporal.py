@@ -56,9 +56,9 @@ class TemporalFeaturesDataset(Dataset):
         # Cargar features fusionadas
         if not features_path.exists():
             logger.warning(f"Features no encontradas: {features_path}")
-            features = np.zeros((1, 640), dtype=np.float32)
+            features = np.zeros((1, 1152), dtype=np.float32)
         else:
-            features = np.load(features_path).astype(np.float32)  # (T, 640)
+            features = np.load(features_path).astype(np.float32)  # (T, 1152)
         
         # Truncar si es muy largo
         if self.max_length is not None and len(features) > self.max_length:

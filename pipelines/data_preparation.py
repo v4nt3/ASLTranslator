@@ -332,12 +332,12 @@ class ActionSegmenter:
             scores = self.calculate_action_score(keypoints)
             
             if self.debug:
-                logger.debug(f"Scores: min={scores.min():.3f}, "
+                logger.debug(f"[ActionSegmenter] Scores: min={scores.min():.3f}, "
                             f"max={scores.max():.3f}, mean={scores.mean():.3f}")
             
             # Si todos los scores son muy bajos, usar fallback
             if scores.max() < 0.2:
-                logger.warning("Action scores muy bajos, usando fallback (middle window)")
+                logger.warning("[ActionSegmenter] Action scores muy bajos, usando fallback (middle window)")
                 T = len(keypoints)
                 mid = T // 2
                 pad = max(self.config.data.num_frames_per_clip // 2, 4)
@@ -354,13 +354,13 @@ class ActionSegmenter:
                 end_idx = min(len(keypoints), end_idx + (pad - pad // 2))
             
             if self.debug:
-                logger.debug(f"Segmento detectado: [{start_idx}, {end_idx}] "
+                logger.debug(f"[ActionSegmenter] Segmento detectado: [{start_idx}, {end_idx}] "
                             f"longitud={end_idx - start_idx}")
             
             return start_idx, end_idx
         
         except Exception as e:
-            logger.warning(f"Error en segmentación: {e}. Usando fallback.")
+            logger.warning(f"[ActionSegmenter] Error en segmentación: {e}. Usando fallback.")
             T = len(keypoints)
             return 0, T
 

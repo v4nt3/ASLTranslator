@@ -15,7 +15,7 @@ import sys
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from pipelines.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
+from pipelines_video.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
