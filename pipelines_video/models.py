@@ -192,8 +192,11 @@ class VideoLSTMClassifier(nn.Module):
             self.attention = TemporalAttention(lstm_output_dim, dropout=self.dropout)
         
         # Clasificador
-        self.classifier = nn.Sequential(nn.Linear(lstm_output_dim, self.num_classes))
-        
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(lstm_output_dim),
+            nn.Dropout(self.dropout),
+            nn.Linear(lstm_output_dim, self.num_classes)
+        )
         
         # Logging
         logger.info(f"VideoLSTMClassifier inicializado:")
