@@ -113,11 +113,10 @@ class VideoTrainer:
         ).to(self.device)
         
         # CORREGIDO: AdamW en lugar de Adam para mejor regularizacion
-        self.optimizer = optim.AdamW(
+        self.optimizer = optim.Adam(
             self.model.parameters(),
             lr=learning_rate,
-            weight_decay=weight_decay,
-            betas=(0.9, 0.999)
+            weight_decay=weight_decay
         )
         
         # Loss con class weights

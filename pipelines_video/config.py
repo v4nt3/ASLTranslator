@@ -61,8 +61,8 @@ class TrainingConfig:
     use_amp: bool = True
     
     # Class balancing - CORREGIDO: Habilitados por defecto
-    use_class_weights: bool = True  # CORREGIDO: Era False
-    focal_loss_gamma: float = 2.0   # CORREGIDO: Era 0, ahora activa Focal Loss
+    use_class_weights: bool = False  # CORREGIDO: Era False
+    focal_loss_gamma: float = 0   # CORREGIDO: Era 0, ahora activa Focal Loss
     class_weight_smoothing: float = 0.05  # CORREGIDO: Reducido de 0.1 a 0.05
     
     # Scheduler - CORREGIDO: Ahora monitorea accuracy
