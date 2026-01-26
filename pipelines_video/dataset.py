@@ -15,10 +15,108 @@ from collections import Counter
 import logging
 import json
 import re
-
 from pipelines_video.config import config
 
 logger = logging.getLogger(__name__)
+
+
+class TemporalAugmentation:
+    """
+    Data augmentation temporal para secuencias de features.
+    Aplica transformaciones que no alteran la semantica de la seña.
+    """
+    
+    def __init__(
+        self,
+        time_warp_prob: float = 0.3,
+        time_mask_prob: float = 0.3,
+        feature_dropout_prob: float = 0.2,
+        noise_std: float = 0.05,
+        speed_change_range: Tuple[float, float] = (0.8, 1.2)
+    ):
+        self.time_warp_prob = time_warp_prob
+        self.time_mask_prob = time_mask_prob
+        self.feature_dropout_prob = feature_dropout_prob
+        self.noise_std = noise_std
+        self.speed_change_range = speed_change_range
+    
+    def __call__(self, features: np.ndarray) -> np.ndarray:
+        """
+        Aplica augmentations aleatorias a la secuencia.
+        
+        Args:
+            features: (T, D) array de features
+        
+        Returns:
+            features_aug: (T', D) array augmentado
+        """
+        features = features.copy()
+        T, D = features.shape
+        
+        # 1. Time warping (cambio de velocidad local)
+        if np.random.random() < self.time_warp_prob and T > 10:
+            features = self._time_warp(features)
+        
+        # 2. Time masking (ocultar segmentos)
+        if np.random.random() < self.time_mask_prob and T > 5:
+            features = self._time_mask(features)
+        
+        # 3. Feature dropout (dropout de dimensiones)
+        if np.random.random() < self.feature_dropout_prob:
+            features = self._feature_dropout(features)
+        
+        # 4. Gaussian noise
+        if self.noise_std > 0:
+            noise = np.random.randn(*features.shape).astype(np.float32) * self.noise_std
+            features = features + noise
+        
+        return features
+    
+    def _time_warp(self, features: np.ndarray) -> np.ndarray:
+        """Cambio de velocidad con interpolacion"""
+        T, D = features.shape
+        
+        # Factor de velocidad aleatorio
+        speed = np.random.uniform(*self.speed_change_range)
+        new_T = int(T / speed)
+        new_T = max(5, min(new_T, T * 2))  # Limites
+        
+        # Interpolacion
+        old_indices = np.arange(T)
+        new_indices = np.linspace(0, T - 1, new_T)
+        
+        warped = np.zeros((new_T, D), dtype=np.float32)
+        for d in range(D):
+            warped[:, d] = np.interp(new_indices, old_indices, features[:, d])
+        
+        return warped
+    
+    def _time_mask(self, features: np.ndarray) -> np.ndarray:
+        """Oculta un segmento temporal con ceros o media"""
+        T, D = features.shape
+        
+        # Longitud del mask (10-30% de la secuencia)
+        mask_len = np.random.randint(1, max(2, int(T * 0.3)))
+        mask_start = np.random.randint(0, max(1, T - mask_len))
+        
+        # Reemplazar con media de la secuencia (mejor que ceros)
+        mean_features = features.mean(axis=0, keepdims=True)
+        features[mask_start:mask_start + mask_len] = mean_features
+        
+        return features
+    
+    def _feature_dropout(self, features: np.ndarray) -> np.ndarray:
+        """Dropout aleatorio de dimensiones de features"""
+        T, D = features.shape
+        
+        # Dropout de 10-20% de dimensiones
+        dropout_ratio = np.random.uniform(0.1, 0.2)
+        num_dropout = int(D * dropout_ratio)
+        
+        dropout_dims = np.random.choice(D, num_dropout, replace=False)
+        features[:, dropout_dims] = 0
+        
+        return features
 
 
 class VideoFeaturesDataset(Dataset):
@@ -31,13 +129,17 @@ class VideoFeaturesDataset(Dataset):
         self,
         features_paths: List[Path],
         class_ids: List[int],
-        max_length: int = None
+        max_length: int = None,
+        augment: bool = False,
+        augmentation_config: dict = None
     ):
         """
         Args:
             features_paths: Lista de rutas a archivos *_fused.npy
             class_ids: Lista de class_id correspondientes
             max_length: Truncar secuencias mas largas (None = sin limite)
+            augment: Aplicar data augmentation temporal
+            augmentation_config: Config para TemporalAugmentation
         """
         assert len(features_paths) == len(class_ids), \
             f"Mismatch: {len(features_paths)} paths vs {len(class_ids)} class_ids"
@@ -45,6 +147,14 @@ class VideoFeaturesDataset(Dataset):
         self.features_paths = features_paths
         self.class_ids = class_ids
         self.max_length = max_length
+        self.augment = augment
+        
+        # Augmentation
+        if augment:
+            aug_config = augmentation_config or {}
+            self.augmenter = TemporalAugmentation(**aug_config)
+        else:
+            self.augmenter = None
         
         # Estadisticas de longitudes
         self._compute_length_stats()
@@ -52,6 +162,7 @@ class VideoFeaturesDataset(Dataset):
         logger.info(f"VideoFeaturesDataset: {len(self)} videos")
         logger.info(f"  Longitudes: min={self.min_length}, max={self.max_length_found}, "
                    f"mean={self.mean_length:.1f}")
+        logger.info(f"  Augmentation: {'enabled' if augment else 'disabled'}")
     
     def _compute_length_stats(self):
         """Calcula estadisticas de longitud de secuencias"""
@@ -90,7 +201,11 @@ class VideoFeaturesDataset(Dataset):
         else:
             features = np.load(features_path).astype(np.float32)
         
-        # Longitud original
+        # Aplicar augmentation (solo si esta habilitado)
+        if self.augment and self.augmenter is not None:
+            features = self.augmenter(features)
+        
+        # Longitud despues de augmentation (puede cambiar por time_warp)
         length = len(features)
         
         # Truncar si es necesario
