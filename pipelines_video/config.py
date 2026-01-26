@@ -49,7 +49,7 @@ class TrainingConfig:
     """Configuracion de entrenamiento"""
     batch_size: int = 64
     learning_rate: float = 3e-4
-    weight_decay: float = 1e-4
+    weight_decay: float = 1e-5
     num_epochs: int = 100
     num_workers: int = 10
     device: str = "cuda"
@@ -57,7 +57,7 @@ class TrainingConfig:
     
     # Class balancing
     use_class_weights: bool = False
-    focal_loss_gamma: float = 2.0  # 0 = CrossEntropy, >0 = FocalLoss
+    focal_loss_gamma: float = 0  # 0 = CrossEntropy, >0 = FocalLoss
     
     # Scheduler
     scheduler_type: str = "plateau"  # "plateau", "onecycle", "cosine"
