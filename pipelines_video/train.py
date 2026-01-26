@@ -23,12 +23,6 @@ from pipelines_video.config import config
 from pipelines_video.models import get_video_model, get_loss_function
 from pipelines_video.dataset import create_video_dataloaders
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-
-
 def setup_logging(checkpoint_dir: Path) -> logging.Logger:
     """Configura logging para consola y archivo"""
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
