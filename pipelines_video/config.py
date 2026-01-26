@@ -48,7 +48,7 @@ class ModelConfig:
 class TrainingConfig:
     """Configuracion de entrenamiento"""
     batch_size: int = 64
-    learning_rate: float = 1e-3
+    learning_rate: float = 3e-4
     weight_decay: float = 1e-4
     num_epochs: int = 100
     num_workers: int = 10
@@ -56,7 +56,7 @@ class TrainingConfig:
     use_amp: bool = True
     
     # Class balancing
-    use_class_weights: bool = True
+    use_class_weights: bool = False
     focal_loss_gamma: float = 2.0  # 0 = CrossEntropy, >0 = FocalLoss
     
     # Scheduler
@@ -69,7 +69,7 @@ class TrainingConfig:
     early_stopping_patience: int = 15
     
     # Label smoothing
-    label_smoothing: float = 0.0
+    label_smoothing: float = 0.1
 
 
 @dataclass

@@ -114,7 +114,7 @@ class VideoTrainer:
         ).to(self.device)
         
         # Optimizer
-        self.optimizer = optim.AdamW(
+        self.optimizer = optim.Adam(
             self.model.parameters(),
             lr=learning_rate,
             weight_decay=weight_decay
