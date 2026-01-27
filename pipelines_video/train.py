@@ -19,6 +19,38 @@ from pipelines_video.config import config
 from pipelines_video.models import get_video_model, get_loss_function
 from pipelines_video.dataset import create_video_dataloaders
 
+
+def mixup_data(x: torch.Tensor, y: torch.Tensor, alpha: float = 0.2):
+    """
+    Mixup: mezcla pares de ejemplos y sus labels.
+    Muy efectivo contra overfitting.
+    
+    Args:
+        x: (B, T, D) features
+        y: (B,) labels
+        alpha: parametro de distribucion Beta (0.2-0.4 recomendado)
+    
+    Returns:
+        mixed_x, y_a, y_b, lam
+    """
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+    else:
+        lam = 1.0
+    
+    batch_size = x.size(0)
+    index = torch.randperm(batch_size, device=x.device)
+    
+    mixed_x = lam * x + (1 - lam) * x[index, :]
+    y_a, y_b = y, y[index]
+    
+    return mixed_x, y_a, y_b, lam
+
+
+def mixup_criterion(criterion, pred, y_a, y_b, lam):
+    """Loss para mixup: combinacion ponderada de losses"""
+    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
+
 def setup_logging(checkpoint_dir: Path) -> logging.Logger:
     """Configura logging para consola y archivo"""
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -52,7 +84,7 @@ def setup_logging(checkpoint_dir: Path) -> logging.Logger:
 
 
 class VideoTrainer:
-    """Entrenador para modelos de video completo"""
+    """Entrenador para modelos de video completo - CON MIXUP"""
     
     def __init__(
         self,
@@ -68,7 +100,9 @@ class VideoTrainer:
         class_weights: Optional[torch.Tensor] = None,
         focal_gamma: float = None,
         gradient_accumulation_steps: int = 1,
-        max_grad_norm: float = None  # NUEVO
+        max_grad_norm: float = None,
+        use_mixup: bool = True,      # NUEVO: Mixup habilitado por defecto
+        mixup_alpha: float = 0.2     # NUEVO: Alpha para mixup
     ):
         # Defaults
         if num_classes is None:
@@ -96,7 +130,9 @@ class VideoTrainer:
         self.use_amp = use_amp
         self.checkpoint_dir = Path(checkpoint_dir)
         self.gradient_accumulation_steps = gradient_accumulation_steps
-        self.max_grad_norm = max_grad_norm  # NUEVO
+        self.max_grad_norm = max_grad_norm
+        self.use_mixup = use_mixup        # NUEVO
+        self.mixup_alpha = mixup_alpha    # NUEVO
         
         # Logger
         self.logger = setup_logging(self.checkpoint_dir)
@@ -113,10 +149,11 @@ class VideoTrainer:
         ).to(self.device)
         
         # CORREGIDO: AdamW en lugar de Adam para mejor regularizacion
-        self.optimizer = optim.Adam(
+        self.optimizer = optim.AdamW(
             self.model.parameters(),
             lr=learning_rate,
-            weight_decay=weight_decay
+            weight_decay=weight_decay,
+            betas=(0.9, 0.999)
         )
         
         # Loss con class weights
@@ -165,6 +202,7 @@ class VideoTrainer:
         self.logger.info(f"  Max grad norm: {max_grad_norm}")
         self.logger.info(f"  Class weights: {'enabled' if class_weights is not None else 'disabled'}")
         self.logger.info(f"  Scheduler monitor: {config.training.scheduler_monitor}")
+        self.logger.info(f"  Mixup: {'enabled (alpha=' + str(mixup_alpha) + ')' if use_mixup else 'disabled'}")
         self.logger.info("="*60)
     
     def _setup_scheduler(self):
@@ -322,18 +360,28 @@ class VideoTrainer:
                 targets = targets.to(self.device)
                 lengths = lengths.to(self.device)
                 
+                # Aplicar Mixup si esta habilitado
+                if self.use_mixup:
+                    features, targets_a, targets_b, lam = mixup_data(
+                        features, targets, self.mixup_alpha
+                    )
+                
                 # Forward
                 if self.use_amp:
                     with autocast():
                         logits = self.model(features, lengths)
-                        loss = self.criterion(logits, targets)
+                        
+                        # Loss con o sin mixup
+                        if self.use_mixup:
+                            loss = mixup_criterion(self.criterion, logits, targets_a, targets_b, lam)
+                        else:
+                            loss = self.criterion(logits, targets)
                         loss = loss / self.gradient_accumulation_steps
                     
                     self.scaler.scale(loss).backward()
                     
                     if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
                         self.scaler.unscale_(self.optimizer)
-                        # CORREGIDO: Usar max_grad_norm configurable
                         torch.nn.utils.clip_grad_norm_(
                             self.model.parameters(), 
                             self.max_grad_norm
@@ -347,12 +395,16 @@ class VideoTrainer:
                             self.scheduler.step()
                 else:
                     logits = self.model(features, lengths)
-                    loss = self.criterion(logits, targets)
+                    
+                    # Loss con o sin mixup
+                    if self.use_mixup:
+                        loss = mixup_criterion(self.criterion, logits, targets_a, targets_b, lam)
+                    else:
+                        loss = self.criterion(logits, targets)
                     loss = loss / self.gradient_accumulation_steps
                     loss.backward()
                     
                     if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
-                        # CORREGIDO: Usar max_grad_norm configurable
                         torch.nn.utils.clip_grad_norm_(
                             self.model.parameters(), 
                             self.max_grad_norm
@@ -492,6 +544,14 @@ def main():
     parser.add_argument("--no_augmentation", action="store_true",
                         help="Deshabilitar data augmentation")
     
+    # Mixup - NUEVO
+    parser.add_argument("--use_mixup", action="store_true", default=True,
+                        help="Usar Mixup (habilitado por defecto)")
+    parser.add_argument("--no_mixup", dest="use_mixup", action="store_false",
+                        help="Deshabilitar Mixup")
+    parser.add_argument("--mixup_alpha", type=float, default=0.2,
+                        help="Alpha para Mixup (0.2-0.4 recomendado)")
+    
     # Gradient accumulation
     parser.add_argument("--gradient_accumulation", type=int, default=1)
     
@@ -516,7 +576,9 @@ def main():
     print(f"Use class weights: {args.use_class_weights}")
     print(f"Focal gamma: {args.focal_gamma or config.training.focal_loss_gamma}")
     print(f"Use augmentation: {use_augmentation}")
+    print(f"Use mixup: {args.use_mixup} (alpha={args.mixup_alpha})")
     print(f"Scheduler monitor: {config.training.scheduler_monitor}")
+    print(f"Weight decay: {config.training.weight_decay}")
     print("="*60 + "\n")
     
     # Create dataloaders - CORREGIDO: Con augmentation
@@ -545,7 +607,9 @@ def main():
         use_attention=args.use_attention,
         class_weights=loss_weights,
         focal_gamma=args.focal_gamma,
-        gradient_accumulation_steps=args.gradient_accumulation
+        gradient_accumulation_steps=args.gradient_accumulation,
+        use_mixup=args.use_mixup,           # NUEVO
+        mixup_alpha=args.mixup_alpha        # NUEVO
     )
     
     # Train

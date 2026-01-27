@@ -19,23 +19,27 @@ logger = logging.getLogger(__name__)
 
 class TemporalAugmentation:
     """
-    Data augmentation temporal para secuencias de features.
-    Aplica transformaciones que no alteran la semantica de la seña.
+    Data augmentation temporal AGRESIVO para secuencias de features.
+    Diseñado para reducir overfitting en datasets desbalanceados.
     """
     
     def __init__(
         self,
-        time_warp_prob: float = 0.3,
-        time_mask_prob: float = 0.3,
-        feature_dropout_prob: float = 0.2,
-        noise_std: float = 0.03,  # CORREGIDO: Reducido de 0.05
-        speed_change_range: Tuple[float, float] = (0.85, 1.15)  # CORREGIDO: Rango mas conservador
+        time_warp_prob: float = 0.5,       # AUMENTADO
+        time_mask_prob: float = 0.4,        # AUMENTADO
+        feature_dropout_prob: float = 0.3,  # AUMENTADO
+        noise_std: float = 0.05,            # AUMENTADO
+        speed_change_range: Tuple[float, float] = (0.8, 1.2),  # MAS VARIACION
+        feature_scale_range: Tuple[float, float] = (0.9, 1.1),  # NUEVO
+        temporal_shift_prob: float = 0.3    # NUEVO
     ):
         self.time_warp_prob = time_warp_prob
         self.time_mask_prob = time_mask_prob
         self.feature_dropout_prob = feature_dropout_prob
         self.noise_std = noise_std
         self.speed_change_range = speed_change_range
+        self.feature_scale_range = feature_scale_range
+        self.temporal_shift_prob = temporal_shift_prob
     
     def __call__(self, features: np.ndarray) -> np.ndarray:
         """
@@ -50,19 +54,28 @@ class TemporalAugmentation:
         features = features.copy()
         T, D = features.shape
         
-        # 1. Time warping (cambio de velocidad local)
+        # 1. Time warping (cambio de velocidad)
         if np.random.random() < self.time_warp_prob and T > 10:
             features = self._time_warp(features)
+            T = len(features)  # Actualizar T
         
-        # 2. Time masking (ocultar segmentos)
+        # 2. Temporal shift (desplazamiento circular)
+        if np.random.random() < self.temporal_shift_prob and T > 5:
+            features = self._temporal_shift(features)
+        
+        # 3. Time masking (ocultar segmentos)
         if np.random.random() < self.time_mask_prob and T > 5:
             features = self._time_mask(features)
         
-        # 3. Feature dropout (dropout de dimensiones)
+        # 4. Feature dropout (dropout de dimensiones)
         if np.random.random() < self.feature_dropout_prob:
             features = self._feature_dropout(features)
         
-        # 4. Gaussian noise
+        # 5. Feature scaling (escalar algunas dimensiones)
+        if np.random.random() < 0.3:
+            features = self._feature_scale(features)
+        
+        # 6. Gaussian noise (siempre aplicar algo de ruido)
         if self.noise_std > 0:
             noise = np.random.randn(*features.shape).astype(np.float32) * self.noise_std
             features = features + noise
@@ -88,30 +101,49 @@ class TemporalAugmentation:
         
         return warped
     
+    def _temporal_shift(self, features: np.ndarray) -> np.ndarray:
+        """Desplazamiento circular en el tiempo"""
+        T, D = features.shape
+        shift = np.random.randint(-T // 4, T // 4)
+        return np.roll(features, shift, axis=0)
+    
     def _time_mask(self, features: np.ndarray) -> np.ndarray:
-        """Oculta un segmento temporal con ceros o media"""
+        """Oculta un segmento temporal - MAS AGRESIVO"""
         T, D = features.shape
         
-        # Longitud del mask (10-20% de la secuencia) - CORREGIDO: Reducido
-        mask_len = np.random.randint(1, max(2, int(T * 0.2)))
+        # Longitud del mask (15-30% de la secuencia)
+        mask_len = np.random.randint(1, max(2, int(T * 0.3)))
         mask_start = np.random.randint(0, max(1, T - mask_len))
         
-        # Reemplazar con media de la secuencia (mejor que ceros)
+        # Reemplazar con media de la secuencia
         mean_features = features.mean(axis=0, keepdims=True)
         features[mask_start:mask_start + mask_len] = mean_features
         
         return features
     
     def _feature_dropout(self, features: np.ndarray) -> np.ndarray:
-        """Dropout aleatorio de dimensiones de features"""
+        """Dropout aleatorio de dimensiones de features - MAS AGRESIVO"""
         T, D = features.shape
         
-        # Dropout de 5-15% de dimensiones - CORREGIDO: Reducido
-        dropout_ratio = np.random.uniform(0.05, 0.15)
+        # Dropout de 10-25% de dimensiones
+        dropout_ratio = np.random.uniform(0.10, 0.25)
         num_dropout = int(D * dropout_ratio)
         
         dropout_dims = np.random.choice(D, num_dropout, replace=False)
         features[:, dropout_dims] = 0
+        
+        return features
+    
+    def _feature_scale(self, features: np.ndarray) -> np.ndarray:
+        """Escala aleatoria de algunas dimensiones"""
+        T, D = features.shape
+        
+        # Escalar 20-40% de las dimensiones
+        num_scale = int(D * np.random.uniform(0.2, 0.4))
+        scale_dims = np.random.choice(D, num_scale, replace=False)
+        
+        scale_factors = np.random.uniform(*self.feature_scale_range, size=num_scale)
+        features[:, scale_dims] *= scale_factors
         
         return features
 

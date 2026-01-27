@@ -140,10 +140,10 @@ class VideoLSTMClassifier(nn.Module):
     """
     Clasificador LSTM bidireccional para videos de longitud variable.
     
-    CORREGIDO:
-    - Clasificador con capas intermedias (no solo 1 capa lineal)
-    - Mejor regularizacion
-    - Layer normalization
+    OPTIMIZADO PARA REDUCIR OVERFITTING:
+    - Clasificador simple por defecto (1 capa)
+    - Dropout agresivo
+    - Opcion de clasificador profundo si se necesita
     """
     
     def __init__(
@@ -155,8 +155,9 @@ class VideoLSTMClassifier(nn.Module):
         dropout: float = None,
         bidirectional: bool = None,
         use_attention: bool = None,
-        classifier_hidden_dim: int = None,  # NUEVO
-        classifier_dropout: float = None     # NUEVO
+        classifier_hidden_dim: int = None,
+        classifier_dropout: float = None,
+        use_simple_classifier: bool = None  # NUEVO
     ):
         super().__init__()
         
@@ -169,19 +170,20 @@ class VideoLSTMClassifier(nn.Module):
         self.bidirectional = bidirectional if bidirectional is not None else config.model.bidirectional
         self.use_attention = use_attention if use_attention is not None else config.model.use_attention
         
-        # NUEVO: Config del clasificador
+        # Config del clasificador
         self.classifier_hidden_dim = classifier_hidden_dim or config.model.classifier_hidden_dim
         self.classifier_dropout = classifier_dropout or config.model.classifier_dropout
+        self.use_simple_classifier = use_simple_classifier if use_simple_classifier is not None else config.model.use_simple_classifier
         
-        # Input projection con LayerNorm
+        # Input projection con dropout fuerte
         self.input_projection = nn.Sequential(
             nn.Linear(self.input_dim, self.hidden_dim),
             nn.LayerNorm(self.hidden_dim),
-            nn.GELU(),  # CORREGIDO: GELU en lugar de ReLU
+            nn.ReLU(),  # ReLU es mas estable que GELU para regularizacion
             nn.Dropout(self.dropout)
         )
         
-        # LSTM
+        # LSTM con dropout entre capas
         self.lstm = nn.LSTM(
             input_size=self.hidden_dim,
             hidden_size=self.hidden_dim,
@@ -191,6 +193,9 @@ class VideoLSTMClassifier(nn.Module):
             bidirectional=self.bidirectional
         )
         
+        # Dropout adicional despues de LSTM
+        self.lstm_dropout = nn.Dropout(self.dropout)
+        
         # Dimension de salida de LSTM
         lstm_output_dim = self.hidden_dim * 2 if self.bidirectional else self.hidden_dim
         
@@ -198,32 +203,43 @@ class VideoLSTMClassifier(nn.Module):
         if self.use_attention:
             self.attention = TemporalAttention(lstm_output_dim, dropout=self.dropout)
         
-        # CORREGIDO: Clasificador con capas intermedias
-        # self.classifier = nn.Sequential(
-        #     nn.LayerNorm(lstm_output_dim),
-        #     nn.Linear(lstm_output_dim, self.classifier_hidden_dim),
-        #     nn.GELU(),
-        #     nn.Dropout(self.classifier_dropout),
-        #     nn.Linear(self.classifier_hidden_dim, self.classifier_hidden_dim // 2),
-        #     nn.GELU(),
-        #     nn.Dropout(self.classifier_dropout * 0.5),  # Menos dropout en capa final
-        #     nn.Linear(self.classifier_hidden_dim // 2, self.num_classes)
-        # )
-        
-        self.classifier = nn.Sequential(nn.Linear(lstm_output_dim, self.num_classes))
+        # Clasificador - SIMPLE por defecto para evitar overfitting
+        if self.use_simple_classifier:
+            # Clasificador simple: LayerNorm + Dropout + Linear
+            self.classifier = nn.Sequential(
+                nn.LayerNorm(lstm_output_dim),
+                nn.Dropout(self.classifier_dropout),
+                nn.Linear(lstm_output_dim, self.num_classes)
+            )
+            logger.info("  Usando clasificador SIMPLE (1 capa)")
+        else:
+            # Clasificador profundo (usar solo si no hay overfitting)
+            self.classifier = nn.Sequential(
+                nn.LayerNorm(lstm_output_dim),
+                nn.Linear(lstm_output_dim, self.classifier_hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(self.classifier_dropout),
+                nn.Linear(self.classifier_hidden_dim, self.num_classes)
+            )
+            logger.info("  Usando clasificador PROFUNDO (2 capas)")
         
         # Inicializacion de pesos
         self._init_weights()
         
         # Logging
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        
         logger.info(f"VideoLSTMClassifier inicializado:")
         logger.info(f"  Input dim: {self.input_dim}")
         logger.info(f"  Hidden dim: {self.hidden_dim}")
         logger.info(f"  Num layers: {self.num_layers}")
+        logger.info(f"  Dropout: {self.dropout}")
         logger.info(f"  Bidirectional: {self.bidirectional}")
         logger.info(f"  Use attention: {self.use_attention}")
-        logger.info(f"  Classifier hidden: {self.classifier_hidden_dim}")
         logger.info(f"  Num classes: {self.num_classes}")
+        logger.info(f"  Total params: {total_params:,}")
+        logger.info(f"  Trainable params: {trainable_params:,}")
     
     def _init_weights(self):
         """Inicializacion de pesos para mejor convergencia"""
@@ -268,6 +284,9 @@ class VideoLSTMClassifier(nn.Module):
             )
         else:
             lstm_out, (h_n, c_n) = self.lstm(x)
+        
+        # Dropout adicional despues de LSTM
+        lstm_out = self.lstm_dropout(lstm_out)
         
         # (B, T, hidden_dim * 2) si bidirectional
         
