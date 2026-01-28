@@ -207,11 +207,10 @@ class VideoLSTMClassifier(nn.Module):
         if self.use_simple_classifier:
             # Clasificador simple: LayerNorm + Dropout + Linear
             self.classifier = nn.Sequential(
-               nn.LayerNorm(lstm_output_dim),
-               nn.Linear(lstm_output_dim, self.classifier_hidden_dim),
-               nn.ReLU(), 
-               nn.Dropout(self.classifier_dropout),
-               nn.Linear(self.classifier_hidden_dim, self.num_classes)
+                nn.LayerNorm(lstm_output_dim),
+                nn.Dropout(self.classifier_dropout),
+                nn.Linear(lstm_output_dim, self.num_classes)
+                
             )
             logger.info("  Usando clasificador SIMPLE (1 capa)")
         else:
