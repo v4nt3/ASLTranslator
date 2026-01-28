@@ -54,7 +54,7 @@ class ModelConfig:
 class TrainingConfig:
     """Configuracion de entrenamiento - OPTIMIZADO PARA REDUCIR OVERFITTING"""
     batch_size: int = 64
-    learning_rate: float = 3e-4  # REDUCIDO: para entrenamiento mas estable
+    learning_rate: float = 1e-3  # REDUCIDO: para entrenamiento mas estable
     weight_decay: float = 1e-2   # MUY AUMENTADO: 1e-4 -> 1e-2 (regularizacion L2 fuerte)
     num_epochs: int = 300
     num_workers: int = 10
