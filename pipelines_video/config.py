@@ -55,7 +55,7 @@ class TrainingConfig:
     """Configuracion de entrenamiento - OPTIMIZADO PARA REDUCIR OVERFITTING"""
     batch_size: int = 64
     learning_rate: float = 1e-3  # REDUCIDO: para entrenamiento mas estable
-    weight_decay: float = 1e-2   # MUY AUMENTADO: 1e-4 -> 1e-2 (regularizacion L2 fuerte)
+    weight_decay: float = 1e-5   # MUY AUMENTADO: 1e-4 -> 1e-2 (regularizacion L2 fuerte)
     num_epochs: int = 300
     num_workers: int = 10
     device: str = "cuda"
@@ -85,10 +85,10 @@ class TrainingConfig:
     # Data augmentation - MAS AGRESIVO
     use_augmentation: bool = True
     augmentation_config: dict = field(default_factory=lambda: {
-        "time_warp_prob": 0.5,       # AUMENTADO: 0.3 -> 0.5
-        "time_mask_prob": 0.4,       # AUMENTADO: 0.3 -> 0.4
-        "feature_dropout_prob": 0.3, # AUMENTADO: 0.2 -> 0.3
-        "noise_std": 0.05,           # AUMENTADO: 0.03 -> 0.05
+        "time_warp_prob": 0.3,       # AUMENTADO: 0.3 -> 0.5
+        "time_mask_prob": 0.2,       # AUMENTADO: 0.3 -> 0.4
+        "feature_dropout_prob": 0.15, # AUMENTADO: 0.2 -> 0.3
+        "noise_std": 0.03,           # AUMENTADO: 0.03 -> 0.05
         "speed_change_range": (0.8, 1.2)  # MAS VARIACION
     })
 
