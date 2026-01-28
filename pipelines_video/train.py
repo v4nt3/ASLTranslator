@@ -146,6 +146,7 @@ class VideoTrainer:
             dropout=config.model.dropout,
             bidirectional=config.model.bidirectional,
             use_attention=use_attention
+            
         ).to(self.device)
         
         # CORREGIDO: AdamW en lugar de Adam para mejor regularizacion
@@ -544,13 +545,13 @@ def main():
     parser.add_argument("--no_augmentation", action="store_true",
                         help="Deshabilitar data augmentation")
     
-    # Mixup - NUEVO
+    # Mixup - REDUCIDO para balancear train/val gap
     parser.add_argument("--use_mixup", action="store_true", default=True,
                         help="Usar Mixup (habilitado por defecto)")
     parser.add_argument("--no_mixup", dest="use_mixup", action="store_false",
                         help="Deshabilitar Mixup")
-    parser.add_argument("--mixup_alpha", type=float, default=0.2,
-                        help="Alpha para Mixup (0.2-0.4 recomendado)")
+    parser.add_argument("--mixup_alpha", type=float, default=0.1,
+                        help="Alpha para Mixup (0.1 = suave, 0.4 = fuerte)")
     
     # Gradient accumulation
     parser.add_argument("--gradient_accumulation", type=int, default=1)

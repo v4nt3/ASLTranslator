@@ -19,19 +19,19 @@ logger = logging.getLogger(__name__)
 
 class TemporalAugmentation:
     """
-    Data augmentation temporal AGRESIVO para secuencias de features.
-    Diseñado para reducir overfitting en datasets desbalanceados.
+    Data augmentation temporal MODERADO para secuencias de features.
+    Balanceado para no crear gap excesivo entre train y val.
     """
     
     def __init__(
         self,
-        time_warp_prob: float = 0.5,       # AUMENTADO
-        time_mask_prob: float = 0.4,        # AUMENTADO
-        feature_dropout_prob: float = 0.3,  # AUMENTADO
-        noise_std: float = 0.05,            # AUMENTADO
-        speed_change_range: Tuple[float, float] = (0.8, 1.2),  # MAS VARIACION
-        feature_scale_range: Tuple[float, float] = (0.9, 1.1),  # NUEVO
-        temporal_shift_prob: float = 0.3    # NUEVO
+        time_warp_prob: float = 0.3,        # REDUCIDO: 0.5 -> 0.3
+        time_mask_prob: float = 0.2,        # REDUCIDO: 0.4 -> 0.2
+        feature_dropout_prob: float = 0.15, # REDUCIDO: 0.3 -> 0.15
+        noise_std: float = 0.02,            # REDUCIDO: 0.05 -> 0.02
+        speed_change_range: Tuple[float, float] = (0.9, 1.1),  # REDUCIDO
+        feature_scale_range: Tuple[float, float] = (0.95, 1.05),  # REDUCIDO
+        temporal_shift_prob: float = 0.15   # REDUCIDO: 0.3 -> 0.15
     ):
         self.time_warp_prob = time_warp_prob
         self.time_mask_prob = time_mask_prob
@@ -72,7 +72,7 @@ class TemporalAugmentation:
             features = self._feature_dropout(features)
         
         # 5. Feature scaling (escalar algunas dimensiones)
-        if np.random.random() < 0.3:
+        if np.random.random() < 0.15:  # REDUCIDO: 0.3 -> 0.15
             features = self._feature_scale(features)
         
         # 6. Gaussian noise (siempre aplicar algo de ruido)
