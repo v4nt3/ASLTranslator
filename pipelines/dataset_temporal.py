@@ -1,24 +1,35 @@
 """
-Dataset optimizado para cargar features precomputadas (.npy fusionados)
-Carga directamente desde carpeta sin necesidad de CSV
+Dataset CORREGIDO - Split a nivel de VIDEO para evitar data leakage
+
+PROBLEMA ORIGINAL:
+- El split era a nivel de CLIP, no de VIDEO
+- Clips del mismo video podían estar en train Y val/test
+- Esto causaba ~82% accuracy artificial que no generalizaba
+
+SOLUCION:
+- Agrupar clips por video_id
+- Split estratificado a nivel de VIDEO
+- Todos los clips de un video van al mismo split
+- Estratificación por clase para mantener distribución
 """
 
-import torch #type: ignore
-import numpy as np #type: ignore
-from torch.utils.data import Dataset, DataLoader #type: ignore
+import torch
+import numpy as np
+from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
-from typing import Tuple, List
+from typing import Tuple, List, Dict, Optional
 import logging
 import json
 import re
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
 
 class TemporalFeaturesDataset(Dataset):
     """
-    Dataset que carga features precomputadas (T, 640)
-    Accede directamente a archivos en features_fused/
+    Dataset que carga features precomputadas (T, 1152)
+    Sin cambios respecto al original
     """
     
     def __init__(
@@ -27,12 +38,6 @@ class TemporalFeaturesDataset(Dataset):
         class_ids: List[int],
         max_length: int = None
     ):
-        """
-        Args:
-            features_paths: Lista de rutas a archivos *_fused.npy
-            class_ids: Lista de class_id correspondientes
-            max_length: Longitud maxima de secuencia (truncar si es mayor)
-        """
         assert len(features_paths) == len(class_ids), "Numero de paths y class_ids debe coincidir"
         
         self.features_paths = features_paths
@@ -45,61 +50,80 @@ class TemporalFeaturesDataset(Dataset):
         return len(self.features_paths)
     
     def __getitem__(self, idx) -> Tuple[torch.Tensor, int]:
-        """
-        Returns:
-            features: (T, 640) tensor
-            class_id: int
-        """
         features_path = self.features_paths[idx]
         class_id = self.class_ids[idx]
         
-        # Cargar features fusionadas
         if not features_path.exists():
             logger.warning(f"Features no encontradas: {features_path}")
             features = np.zeros((1, 1152), dtype=np.float32)
         else:
-            features = np.load(features_path).astype(np.float32)  # (T, 1152)
+            features = np.load(features_path).astype(np.float32)
         
-        # Truncar si es muy largo
         if self.max_length is not None and len(features) > self.max_length:
             features = features[:self.max_length]
         
-        # Convertir a tensor
         features = torch.from_numpy(features).float()
         
         return features, class_id
 
 
-def load_data_from_folder(
+def extract_video_id(filename: str) -> Optional[str]:
+    """
+    Extrae el video_id de un nombre de archivo de clip.
+    
+    Ejemplos:
+        "023931338852502426_clip_0_fused.npy" -> "023931338852502426"
+        "023931338852502426-1 DOLLAR_clip_1_fused.npy" -> "023931338852502426"
+    """
+    # Remover sufijo _fused si existe
+    name = filename.replace('_fused', '').replace('.npy', '')
+    
+    # Extraer video_id (digitos al inicio)
+    match = re.match(r'^(\d+)', name)
+    if match:
+        return match.group(1)
+    return None
+
+
+def load_data_with_video_split(
     features_dir: Path,
     metadata_path: Path,
     train_split: float = 0.7,
     val_split: float = 0.15,
     random_seed: int = 42
-) -> Tuple[List[Tuple[Path, int]], List[Tuple[Path, int]], List[Tuple[Path, int]]]:
+) -> Tuple[List[Tuple[Path, int]], List[Tuple[Path, int]], List[Tuple[Path, int]], Dict]:
     """
-    Carga datos directamente desde la carpeta features_fused
+    CORREGIDO: Split a nivel de VIDEO, no de clip.
+    
+    Proceso:
+    1. Agrupar clips por video_id
+    2. Agrupar videos por class_id (para estratificacion)
+    3. Split estratificado de VIDEOS
+    4. Asignar todos los clips de cada video a su split
     
     Args:
         features_dir: Directorio con archivos *_fused.npy
         metadata_path: Ruta a dataset_meta.json
-        train_split: Proporcion para entrenamiento
+        train_split: Proporcion para entrenamiento (de videos, no clips)
         val_split: Proporcion para validacion
         random_seed: Semilla para reproducibilidad
     
     Returns:
         train_data, val_data, test_data: Listas de (path, class_id)
+        stats: Diccionario con estadisticas del split
     """
-    logger.info(f"Cargando datos desde: {features_dir}")
-    logger.info(f"Cargando metadata desde: {metadata_path}")
+    logger.info(f"="*60)
+    logger.info("CARGANDO DATOS CON SPLIT A NIVEL DE VIDEO (SIN DATA LEAKAGE)")
+    logger.info(f"="*60)
+    logger.info(f"Features dir: {features_dir}")
+    logger.info(f"Metadata: {metadata_path}")
     
-    # Cargar metadata para obtener class_id
+    # 1. Cargar metadata para obtener class_id por video
     with open(metadata_path, 'r') as f:
         metadata = json.load(f)
     
     video_id_to_class = {}
     
-    # Manejar diferentes formatos del JSON
     if isinstance(metadata, dict):
         if 'videos' in metadata:
             entries = metadata['videos']
@@ -120,8 +144,6 @@ def load_data_from_folder(
             class_id = entry.get('class_id')
             
             if video_file and class_id is not None:
-                # Extraer video_id (primeros numeros antes del guion)
-                # Ejemplo: "023931338852502426-1 DOLLAR.mp4" -> "023931338852502426"
                 match = re.match(r'^(\d+)', video_file)
                 if match:
                     video_id = match.group(1)
@@ -129,83 +151,143 @@ def load_data_from_folder(
     
     logger.info(f"Metadata cargada: {len(video_id_to_class)} videos con class_id")
     
+    # 2. Encontrar todos los clips y agrupar por video_id
     features_dir = Path(features_dir)
     fused_files = list(features_dir.glob("*_fused.npy"))
     
     logger.info(f"Archivos fusionados encontrados: {len(fused_files)}")
     
-    data = []
+    # video_id -> lista de (clip_path, class_id)
+    video_to_clips: Dict[str, List[Tuple[Path, int]]] = defaultdict(list)
     missing_metadata = 0
     
     for fused_path in fused_files:
-        # Ejemplo: "023931338852502426_clip_0_fused.npy" -> "023931338852502426"
-        filename = fused_path.stem.replace('_fused', '')
-        match = re.match(r'^(\d+)', filename)
+        video_id = extract_video_id(fused_path.name)
         
-        if match:
-            video_id = match.group(1)
-            
-            # Buscar class_id del video original en metadata
-            if video_id in video_id_to_class:
-                class_id = video_id_to_class[video_id]
-                data.append((fused_path, class_id))
-            else:
-                missing_metadata += 1
+        if video_id and video_id in video_id_to_class:
+            class_id = video_id_to_class[video_id]
+            video_to_clips[video_id].append((fused_path, class_id))
         else:
             missing_metadata += 1
     
     if missing_metadata > 0:
         logger.warning(f"Clips sin metadata: {missing_metadata}")
     
-    logger.info(f"Clips validos con class_id: {len(data)}")
+    logger.info(f"Videos unicos con clips: {len(video_to_clips)}")
     
-    if len(data) == 0:
-        raise ValueError("No se encontraron clips validos con class_id. Verifica el formato del metadata y los nombres de archivos.")
+    total_clips = sum(len(clips) for clips in video_to_clips.values())
+    logger.info(f"Total clips validos: {total_clips}")
     
-    import random
-    random.seed(random_seed)
-    random.shuffle(data)
+    if len(video_to_clips) == 0:
+        raise ValueError("No se encontraron videos validos con clips")
     
-    n = len(data)
-    train_size = int(n * train_split)
-    val_size = int(n * val_split)
+    # 3. Agrupar videos por clase para estratificacion
+    # class_id -> lista de video_ids
+    class_to_videos: Dict[int, List[str]] = defaultdict(list)
     
-    train_data = data[:train_size]
-    val_data = data[train_size:train_size + val_size]
-    test_data = data[train_size + val_size:]
+    for video_id, clips in video_to_clips.items():
+        class_id = clips[0][1]  # Todos los clips tienen el mismo class_id
+        class_to_videos[class_id].append(video_id)
     
-    logger.info(f"Split completado:")
-    logger.info(f"  Train: {len(train_data)} samples")
-    logger.info(f"  Val: {len(val_data)} samples")
-    logger.info(f"  Test: {len(test_data)} samples")
+    logger.info(f"Clases unicas: {len(class_to_videos)}")
     
-    return train_data, val_data, test_data
+    # 4. Split estratificado de VIDEOS
+    np.random.seed(random_seed)
+    
+    train_videos = []
+    val_videos = []
+    test_videos = []
+    
+    for class_id, video_ids in class_to_videos.items():
+        np.random.shuffle(video_ids)
+        
+        n_videos = len(video_ids)
+        n_train = max(1, int(n_videos * train_split))
+        n_val = max(0, int(n_videos * val_split))
+        
+        # Asegurar al menos 1 video en train
+        if n_videos == 1:
+            train_videos.extend(video_ids)
+        elif n_videos == 2:
+            train_videos.append(video_ids[0])
+            val_videos.append(video_ids[1])
+        else:
+            train_videos.extend(video_ids[:n_train])
+            val_videos.extend(video_ids[n_train:n_train + n_val])
+            test_videos.extend(video_ids[n_train + n_val:])
+    
+    logger.info(f"\nSplit de VIDEOS:")
+    logger.info(f"  Train videos: {len(train_videos)}")
+    logger.info(f"  Val videos: {len(val_videos)}")
+    logger.info(f"  Test videos: {len(test_videos)}")
+    
+    # 5. Convertir videos a clips
+    train_data = []
+    val_data = []
+    test_data = []
+    
+    for video_id in train_videos:
+        train_data.extend(video_to_clips[video_id])
+    
+    for video_id in val_videos:
+        val_data.extend(video_to_clips[video_id])
+    
+    for video_id in test_videos:
+        test_data.extend(video_to_clips[video_id])
+    
+    # Shuffle clips dentro de cada split (pero no entre splits)
+    np.random.shuffle(train_data)
+    np.random.shuffle(val_data)
+    np.random.shuffle(test_data)
+    
+    logger.info(f"\nSplit de CLIPS:")
+    logger.info(f"  Train clips: {len(train_data)}")
+    logger.info(f"  Val clips: {len(val_data)}")
+    logger.info(f"  Test clips: {len(test_data)}")
+    
+    # Estadisticas adicionales
+    stats = {
+        'total_videos': len(video_to_clips),
+        'total_clips': total_clips,
+        'total_classes': len(class_to_videos),
+        'train_videos': len(train_videos),
+        'val_videos': len(val_videos),
+        'test_videos': len(test_videos),
+        'train_clips': len(train_data),
+        'val_clips': len(val_data),
+        'test_clips': len(test_data),
+        'clips_per_video_avg': total_clips / len(video_to_clips) if video_to_clips else 0
+    }
+    
+    # Verificar que no hay leakage
+    train_video_ids = set(train_videos)
+    val_video_ids = set(val_videos)
+    test_video_ids = set(test_videos)
+    
+    assert len(train_video_ids & val_video_ids) == 0, "LEAKAGE: Videos en train y val!"
+    assert len(train_video_ids & test_video_ids) == 0, "LEAKAGE: Videos en train y test!"
+    assert len(val_video_ids & test_video_ids) == 0, "LEAKAGE: Videos en val y test!"
+    
+    logger.info("\n[OK] Verificacion de data leakage: PASADA")
+    logger.info("     No hay videos compartidos entre splits")
+    logger.info(f"="*60 + "\n")
+    
+    return train_data, val_data, test_data, stats
 
 
 def temporal_collate_fn(batch: List[Tuple[torch.Tensor, int]]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Collate function para secuencias de features de longitud variable
-    
-    Args:
-        batch: Lista de (features, class_id)
-            features: (T_i, 640)
-            class_id: int
-    
-    Returns:
-        padded_features: (B, max_T, 640)
-        targets: (B,)
-        lengths: (B,)
+    Collate function para secuencias de longitud variable
+    Sin cambios respecto al original
     """
     features_list = [item[0] for item in batch]
     targets = torch.tensor([item[1] for item in batch], dtype=torch.long)
     
-    # Obtener longitudes
     lengths = torch.tensor([f.shape[0] for f in features_list], dtype=torch.long)
     max_length = lengths.max().item()
     
-    # Pad features
     batch_size = len(features_list)
-    feature_dim = features_list[0].shape[1]  # 640
+    feature_dim = features_list[0].shape[1]
     
     padded_features = torch.zeros(batch_size, max_length, feature_dim, dtype=torch.float32)
     
@@ -216,7 +298,7 @@ def temporal_collate_fn(batch: List[Tuple[torch.Tensor, int]]) -> Tuple[torch.Te
     return padded_features, targets, lengths
 
 
-def create_temporal_dataloaders(
+def create_temporal_dataloaders_fixed(
     features_dir: Path,
     metadata_path: Path,
     batch_size: int = 32,
@@ -225,25 +307,15 @@ def create_temporal_dataloaders(
     train_split: float = 0.7,
     val_split: float = 0.15,
     random_seed: int = 42
-) -> Tuple[DataLoader, DataLoader, DataLoader]:
+) -> Tuple[DataLoader, DataLoader, DataLoader, Dict]:
     """
-    Crea DataLoaders cargando directamente desde carpeta features_fused
-    
-    Args:
-        features_dir: Directorio con archivos *_fused.npy
-        metadata_path: Ruta a dataset_meta.json
-        batch_size: Batch size
-        num_workers: Numero de workers
-        max_length: Longitud maxima de secuencia
-        train_split: Proporcion para entrenamiento
-        val_split: Proporcion para validacion
-        random_seed: Semilla para reproducibilidad
+    CORREGIDO: Crea DataLoaders con split a nivel de video.
     
     Returns:
-        train_loader, val_loader, test_loader
+        train_loader, val_loader, test_loader, stats
     """
     
-    train_data, val_data, test_data = load_data_from_folder(
+    train_data, val_data, test_data, stats = load_data_with_video_split(
         features_dir=features_dir,
         metadata_path=metadata_path,
         train_split=train_split,
@@ -296,9 +368,97 @@ def create_temporal_dataloaders(
         persistent_workers=num_workers > 0
     )
     
-    logger.info(f"DataLoaders creados:")
-    logger.info(f"   Train: {len(train_loader)} batches")
-    logger.info(f"   Val: {len(val_loader)} batches")
-    logger.info(f"   Test: {len(test_loader)} batches")
+    logger.info(f"DataLoaders creados (SIN DATA LEAKAGE):")
+    logger.info(f"   Train: {len(train_loader)} batches ({len(train_dataset)} samples)")
+    logger.info(f"   Val: {len(val_loader)} batches ({len(val_dataset)} samples)")
+    logger.info(f"   Test: {len(test_loader)} batches ({len(test_dataset)} samples)")
     
-    return train_loader, val_loader, test_loader
+    return train_loader, val_loader, test_loader, stats
+
+
+# ============================================================================
+# FUNCION ADICIONAL: Analisis de distribucion de clases
+# ============================================================================
+
+def analyze_class_distribution(
+    features_dir: Path,
+    metadata_path: Path
+) -> Dict:
+    """
+    Analiza la distribucion de clases en el dataset.
+    Util para entender el desbalanceo.
+    """
+    with open(metadata_path, 'r') as f:
+        metadata = json.load(f)
+    
+    video_id_to_class = {}
+    class_to_name = {}
+    
+    entries = metadata.get('videos', metadata) if isinstance(metadata, dict) else metadata
+    
+    for entry in entries:
+        if isinstance(entry, dict):
+            video_file = entry.get('video_file', '')
+            class_id = entry.get('class_id')
+            class_name = entry.get('class_name', f'CLASS_{class_id}')
+            
+            if video_file and class_id is not None:
+                match = re.match(r'^(\d+)', video_file)
+                if match:
+                    video_id = match.group(1)
+                    video_id_to_class[video_id] = int(class_id)
+                    class_to_name[int(class_id)] = class_name
+    
+    # Contar clips por clase
+    features_dir = Path(features_dir)
+    fused_files = list(features_dir.glob("*_fused.npy"))
+    
+    class_counts = defaultdict(int)
+    video_counts = defaultdict(set)
+    
+    for fused_path in fused_files:
+        video_id = extract_video_id(fused_path.name)
+        if video_id and video_id in video_id_to_class:
+            class_id = video_id_to_class[video_id]
+            class_counts[class_id] += 1
+            video_counts[class_id].add(video_id)
+    
+    # Estadisticas
+    counts = list(class_counts.values())
+    video_per_class = [len(v) for v in video_counts.values()]
+    
+    analysis = {
+        'total_classes': len(class_counts),
+        'total_clips': sum(counts),
+        'clips_per_class': {
+            'min': min(counts) if counts else 0,
+            'max': max(counts) if counts else 0,
+            'mean': np.mean(counts) if counts else 0,
+            'median': np.median(counts) if counts else 0,
+            'std': np.std(counts) if counts else 0
+        },
+        'videos_per_class': {
+            'min': min(video_per_class) if video_per_class else 0,
+            'max': max(video_per_class) if video_per_class else 0,
+            'mean': np.mean(video_per_class) if video_per_class else 0,
+        },
+        'class_to_name': class_to_name,
+        'class_counts': dict(class_counts),
+        'imbalance_ratio': max(counts) / min(counts) if counts and min(counts) > 0 else float('inf')
+    }
+    
+    logger.info("\n" + "="*60)
+    logger.info("ANALISIS DE DISTRIBUCION DE CLASES")
+    logger.info("="*60)
+    logger.info(f"Total clases: {analysis['total_classes']}")
+    logger.info(f"Total clips: {analysis['total_clips']}")
+    logger.info(f"Clips por clase: min={analysis['clips_per_class']['min']}, "
+                f"max={analysis['clips_per_class']['max']}, "
+                f"mean={analysis['clips_per_class']['mean']:.1f}")
+    logger.info(f"Videos por clase: min={analysis['videos_per_class']['min']}, "
+                f"max={analysis['videos_per_class']['max']}, "
+                f"mean={analysis['videos_per_class']['mean']:.1f}")
+    logger.info(f"Ratio de desbalanceo: {analysis['imbalance_ratio']:.1f}x")
+    logger.info("="*60 + "\n")
+    
+    return analysis

@@ -1,53 +1,55 @@
 """
-Script de entrenamiento optimizado para modelo temporal
-Entrena SOLO la parte temporal (LSTM/Transformer + Classifier)
-Carga directamente desde carpeta features_fused sin necesidad de CSV
+Script de entrenamiento CORREGIDO - Sin data leakage
+
+CAMBIOS PRINCIPALES:
+1. Usa dataset_temporal_fixed con split a nivel de VIDEO
+2. Guarda estadisticas del split para verificacion
+3. Mejor logging del proceso
+
+NOTA: El accuracy real sera menor que el anterior (~82%) porque
+ahora el modelo no puede "hacer trampa" viendo clips del mismo video
+en train y val/test.
 """
 
-import torch #type: ignore
-import torch.nn as nn #type: ignore
-import torch.optim as optim #type: ignore
-from torch.cuda.amp import GradScaler, autocast #type: ignore
-import numpy as np #type: ignore
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.cuda.amp import GradScaler, autocast
+import numpy as np
 from pathlib import Path
-from tqdm import tqdm #type: ignore
+from tqdm import tqdm
 import logging
 import json
 from typing import Tuple
 import argparse
 
 from pipelines.models_temporal import get_temporal_model
-from pipelines.dataset_temporal import create_temporal_dataloaders
-from pipelines.evaluate import evaluate_model_comprehensive
+from pipelines.dataset_temporal import (
+    create_temporal_dataloaders_fixed,
+    analyze_class_distribution
+)
 
 from config import config
 
+
 def setup_logging(checkpoint_dir: Path):
     """Configura logging para consola y archivo"""
-    # Crear directorio de checkpoints si no existe
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Archivo de log
     log_file = checkpoint_dir / "training.log"
     
-    # Limpiar handlers anteriores
     logger = logging.getLogger(__name__)
     logger.handlers.clear()
     
-    # Formato
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     
-    # Handler para consola
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
     
-    # Handler para archivo
     file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
     
-    # Agregar handlers
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
     logger.setLevel(logging.INFO)
@@ -56,10 +58,14 @@ def setup_logging(checkpoint_dir: Path):
     
     return logger
 
+
 logger = logging.getLogger(__name__)
 
-class TemporalTrainer:
-    """Entrenador para modelos temporales CORREGIDO"""
+
+class TemporalTrainerFixed:
+    """
+    Entrenador CORREGIDO que usa split a nivel de video.
+    """
     
     def __init__(
         self,
@@ -71,7 +77,7 @@ class TemporalTrainer:
         device: str = None,
         use_amp: bool = None,
         checkpoint_dir: Path = None,
-        use_attention: bool = False
+        use_attention: bool = True
     ):
         if num_classes is None:
             num_classes = config.model.num_classes
@@ -98,48 +104,40 @@ class TemporalTrainer:
         global logger
         logger = setup_logging(self.checkpoint_dir)
         
-        # CAMBIADO: Usar dropout de config
+        logger.info("="*60)
+        logger.info("ENTRENAMIENTO CORREGIDO - SIN DATA LEAKAGE")
+        logger.info("="*60)
+        
+        # Crear modelo
         self.model = get_temporal_model(
             model_type=model_type,
             num_classes=num_classes,
-            hidden_dim=config.training.model_hidden_dim,      # NUEVO
-            num_layers=config.training.model_num_layers,      # NUEVO
-            dropout=config.training.model_dropout,            # CAMBIADO
-            bidirectional=config.training.model_bidirectional,# NUEVO
+            hidden_dim=config.training.model_hidden_dim,
+            num_layers=config.training.model_num_layers,
+            dropout=config.training.model_dropout,
+            bidirectional=config.training.model_bidirectional,
             use_attention=use_attention
         ).to(self.device)
         
-        # Optimizer
-        self.optimizer = optim.Adam(
+        # Optimizer con AdamW (mejor regularizacion)
+        self.optimizer = optim.AdamW(
             self.model.parameters(),
             lr=learning_rate,
             weight_decay=weight_decay
         )
         
-        # CAMBIADO: Scheduler según config
-        if config.training.scheduler_type == "plateau":
-            self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer, 
-                mode='min',
-                factor=config.training.scheduler_factor,      # 0.5
-                patience=config.training.scheduler_patience,   # 5
-                threshold=1e-4,
-                min_lr=config.training.scheduler_min_lr       # 1e-6
-            )
-            logger.info("Usando ReduceLROnPlateau scheduler")
-        elif config.training.scheduler_type == "onecycle":
-            # OneCycle requiere conocer total_steps
-            # Se configura más adelante en train()
-            self.scheduler = None
-            logger.info("OneCycle scheduler se configurará en train()")
-        else:
-            self.scheduler = None
-            logger.info("Sin scheduler")
-        
-        # Loss - CAMBIADO: usar label_smoothing de config
-        self.criterion = nn.CrossEntropyLoss(
-            label_smoothing=config.training.label_smoothing  # Ahora 0.0
+        # Scheduler
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer,
+            mode='min',
+            factor=config.training.scheduler_factor,
+            patience=config.training.scheduler_patience,
+            threshold=1e-4,
+            min_lr=config.training.scheduler_min_lr
         )
+        
+        # Loss sin label smoothing (puede causar problemas con clases desbalanceadas)
+        self.criterion = nn.CrossEntropyLoss()
         
         # AMP
         self.scaler = GradScaler() if use_amp else None
@@ -155,49 +153,45 @@ class TemporalTrainer:
         }
         
         self.best_val_acc = 0.0
+        self.split_stats = None
         
-        logger.info(f"TemporalTrainer inicializado")
+        logger.info(f"Configuracion:")
         logger.info(f"   Device: {self.device}")
         logger.info(f"   Model type: {model_type}")
         logger.info(f"   Num classes: {num_classes}")
         logger.info(f"   Learning rate: {learning_rate}")
         logger.info(f"   Weight decay: {weight_decay}")
-        logger.info(f"   Label smoothing: {config.training.label_smoothing}")  # NUEVO
-        logger.info(f"   Dropout: {config.training.model_dropout}")            # NUEVO
+        logger.info(f"   Dropout: {config.training.model_dropout}")
         logger.info(f"   Use attention: {use_attention}")
         logger.info(f"   Use AMP: {use_amp}")
     
-    def train(self, train_loader, val_loader):
-        """Loop de entrenamiento CORREGIDO"""
+    def train(self, train_loader, val_loader, split_stats: dict = None):
+        """Loop de entrenamiento"""
+        
+        if split_stats:
+            self.split_stats = split_stats
+            # Guardar estadisticas del split
+            stats_path = self.checkpoint_dir / "split_stats.json"
+            with open(stats_path, 'w') as f:
+                json.dump(split_stats, f, indent=2)
+            logger.info(f"Estadisticas del split guardadas en: {stats_path}")
+        
         logger.info(f"\n{'='*60}")
         logger.info(f"Iniciando entrenamiento por {self.num_epochs} epochs")
         logger.info(f"{'='*60}\n")
         
-        # Configurar OneCycle si es necesario
-        if config.training.scheduler_type == "onecycle":
-            total_steps = len(train_loader) * self.num_epochs
-            self.scheduler = optim.lr_scheduler.OneCycleLR(
-                self.optimizer,
-                max_lr=config.training.learning_rate,
-                total_steps=total_steps,
-                pct_start=config.training.pct_start,
-                div_factor=config.training.lr_div_factor,
-                final_div_factor=1e4
-            )
-            logger.info(f"OneCycle scheduler configurado: {total_steps} steps")
-        
         patience_counter = 0
+        
         for epoch in range(self.num_epochs):
             logger.info(f"\nEpoch {epoch + 1}/{self.num_epochs}")
             
             train_loss, train_acc, train_top5 = self.train_epoch(train_loader)
             val_loss, val_accuracy, val_top5 = self.validate(val_loader)
             
-            # CAMBIADO: Scheduler step según tipo
-            if config.training.scheduler_type == "plateau":
-                self.scheduler.step(val_loss)
-            # OneCycle se actualiza en cada batch (dentro de train_epoch)
+            # Scheduler step
+            self.scheduler.step(val_loss)
             
+            # Guardar historia
             self.history['train_loss'].append(train_loss)
             self.history['train_accuracy'].append(train_acc)
             self.history['train_top5_accuracy'].append(train_top5)
@@ -206,59 +200,74 @@ class TemporalTrainer:
             self.history['val_top5_accuracy'].append(val_top5)
             self.history['learning_rate'].append(self.optimizer.param_groups[0]['lr'])
             
-            logger.info(f"  Early Stopping Patience: {patience_counter}/{config.training.early_stopping_patience}")
+            # Log
             logger.info(f"   Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Train Top-5: {train_top5:.4f}")
             logger.info(f"   Val Loss: {val_loss:.4f} | Val Acc: {val_accuracy:.4f} | Val Top-5: {val_top5:.4f}")
             logger.info(f"   LR: {self.optimizer.param_groups[0]['lr']:.6f}")
+            logger.info(f"   Patience: {patience_counter}/{config.training.early_stopping_patience}")
             
-            # Save best model
+            # Guardar mejor modelo
             if val_accuracy > self.best_val_acc:
                 self.best_val_acc = val_accuracy
                 best_path = self.checkpoint_dir / "best_model.pt"
-                torch.save(self.model.state_dict(), best_path)
-                logger.info(f"   ★ Best model saved! Accuracy: {val_accuracy:.4f}")
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': self.model.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
+                    'val_accuracy': val_accuracy,
+                    'val_top5_accuracy': val_top5,
+                    'split_stats': self.split_stats
+                }, best_path)
+                logger.info(f"   [BEST] Modelo guardado! Accuracy: {val_accuracy:.4f}")
                 patience_counter = 0
             else:
                 patience_counter += 1
             
-            # Save checkpoint every 15 epochs
-            if (epoch + 1) % 15 == 0:
+            # Checkpoint periodico
+            if (epoch + 1) % 10 == 0:
                 checkpoint_path = self.checkpoint_dir / f"checkpoint_epoch_{epoch+1}.pt"
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'val_accuracy': val_accuracy,
+                    'history': self.history
                 }, checkpoint_path)
-        
+            
+            # Early stopping
             if patience_counter >= config.training.early_stopping_patience:
-                logger.info(f"Early stopping activado. No hay mejora en {config.training.early_stopping_patience} epochs.")
-                logger.info(f"Mejor Val Accuracy: {self.best_val_acc:.4f}")
+                logger.info(f"\nEarly stopping! No hay mejora en {config.training.early_stopping_patience} epochs.")
                 break
         
-        # Save final model
+        # Guardar modelo final
         final_path = self.checkpoint_dir / "final_model.pt"
-        torch.save(self.model.state_dict(), final_path)
+        torch.save({
+            'model_state_dict': self.model.state_dict(),
+            'val_accuracy': self.best_val_acc,
+            'history': self.history,
+            'split_stats': self.split_stats
+        }, final_path)
         
-        # Save history
+        # Guardar historia
         history_path = self.checkpoint_dir / "training_history.json"
         with open(history_path, 'w') as f:
             json.dump(self.history, f, indent=2)
         
         logger.info(f"\n{'='*60}")
-        logger.info(f"Entrenamiento completado!")
+        logger.info(f"ENTRENAMIENTO COMPLETADO")
         logger.info(f"   Best Val Accuracy: {self.best_val_acc:.4f}")
-        logger.info(f"   Checkpoints guardados en: {self.checkpoint_dir}")
+        logger.info(f"   Checkpoints en: {self.checkpoint_dir}")
         logger.info(f"{'='*60}\n")
+        
+        return self.best_val_acc
     
     def train_epoch(self, train_loader) -> Tuple[float, float, float]:
-        """Entrena una epoca CORREGIDO"""
+        """Entrena una epoca"""
         self.model.train()
         total_loss = 0.0
         all_preds = []
         all_targets = []
         all_logits = []
-        num_batches = 0
         
         with tqdm(train_loader, desc="Training") as pbar:
             for features, targets, lengths in pbar:
@@ -268,7 +277,6 @@ class TemporalTrainer:
                 
                 self.optimizer.zero_grad()
                 
-                # Forward
                 if self.use_amp:
                     with autocast():
                         logits = self.model(features, lengths)
@@ -286,14 +294,8 @@ class TemporalTrainer:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                     self.optimizer.step()
                 
-                # NUEVO: OneCycle step después de cada batch
-                if config.training.scheduler_type == "onecycle" and self.scheduler:
-                    self.scheduler.step()
-                
                 total_loss += loss.item()
-                num_batches += 1
                 
-                # Guardar predicciones
                 preds = torch.argmax(logits, dim=1)
                 all_preds.append(preds.cpu().numpy())
                 all_targets.append(targets.cpu().numpy())
@@ -301,20 +303,19 @@ class TemporalTrainer:
                 
                 pbar.set_postfix({'loss': f'{loss.item():.4f}'})
         
-        # Calcular métricas
-        avg_loss = total_loss / num_batches
+        avg_loss = total_loss / len(train_loader)
         all_preds = np.concatenate(all_preds)
         all_targets = np.concatenate(all_targets)
         all_logits = np.concatenate(all_logits)
         
-        train_accuracy = np.mean(all_preds == all_targets)
-        train_top5_accuracy = self._compute_top5_accuracy(all_logits, all_targets)
+        accuracy = np.mean(all_preds == all_targets)
+        top5_accuracy = self._compute_top5_accuracy(all_logits, all_targets)
         
-        return avg_loss, train_accuracy, train_top5_accuracy
+        return avg_loss, accuracy, top5_accuracy
     
     @torch.no_grad()
     def validate(self, val_loader) -> Tuple[float, float, float]:
-        """Valida el modelo y retorna loss, accuracy y top5_accuracy"""
+        """Valida el modelo"""
         self.model.eval()
         total_loss = 0.0
         all_preds = []
@@ -342,202 +343,155 @@ class TemporalTrainer:
                 all_targets.append(targets.cpu().numpy())
                 all_logits.append(logits.cpu().numpy())
         
-        # Calcular métricas
+        avg_loss = total_loss / len(val_loader)
         all_preds = np.concatenate(all_preds)
         all_targets = np.concatenate(all_targets)
         all_logits = np.concatenate(all_logits)
         
         accuracy = np.mean(all_preds == all_targets)
         top5_accuracy = self._compute_top5_accuracy(all_logits, all_targets)
-        avg_loss = total_loss / len(val_loader)
         
         return avg_loss, accuracy, top5_accuracy
     
     def _compute_top5_accuracy(self, logits: np.ndarray, targets: np.ndarray) -> float:
         """Calcula top-5 accuracy"""
-        top5_preds = np.argsort(logits, axis=1)[:, -5:]  # Top 5 predicciones
+        top5_preds = np.argsort(logits, axis=1)[:, -5:]
         correct = np.any(top5_preds == targets[:, None], axis=1)
         return np.mean(correct)
-    
-    def train(self, train_loader, val_loader):
-        """Loop de entrenamiento completo"""
-        logger.info(f"\n{'='*60}")
-        logger.info(f"Iniciando entrenamiento por {self.num_epochs} epochs")
-        logger.info(f"{'='*60}\n")
-        
-        patience_counter = 0
-        for epoch in range(self.num_epochs):
-            logger.info(f"\nEpoch {epoch + 1}/{self.num_epochs}")
-            
-            train_loss, train_acc, train_top5 = self.train_epoch(train_loader)
-            
-            val_loss, val_accuracy, val_top5 = self.validate(val_loader)
-            
-            # Scheduler step
-            self.scheduler.step(val_loss)
-            
-            self.history['train_loss'].append(train_loss)
-            self.history['train_accuracy'].append(train_acc)
-            self.history['train_top5_accuracy'].append(train_top5)
-            self.history['val_loss'].append(val_loss)
-            self.history['val_accuracy'].append(val_accuracy)
-            self.history['val_top5_accuracy'].append(val_top5)
-            self.history['learning_rate'].append(self.optimizer.param_groups[0]['lr'])
-            
-            logger.info(f"  Early Stopping Patience: {patience_counter}/{config.training.early_stopping_patience}")
-            logger.info(f"   Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Train Top-5: {train_top5:.4f}")
-            logger.info(f"   Val Loss: {val_loss:.4f} | Val Acc: {val_accuracy:.4f} | Val Top-5: {val_top5:.4f}")
-            logger.info(f"   LR: {self.optimizer.param_groups[0]['lr']:.6f}")
-            
-            # Save best model
-            if val_accuracy > self.best_val_acc:
-                self.best_val_acc = val_accuracy
-                best_path = self.checkpoint_dir / "best_model.pt"
-                torch.save(self.model.state_dict(), best_path)
-                logger.info(f"   ★ Best model saved! Accuracy: {val_accuracy:.4f}")
-                patience_counter = 0
-            else:
-                patience_counter += 1
-            
-            # Save checkpoint every 15 epochs
-            if (epoch + 1) % 15 == 0:
-                checkpoint_path = self.checkpoint_dir / f"checkpoint_epoch_{epoch+1}.pt"
-                torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                    'val_accuracy': val_accuracy,
-                }, checkpoint_path)
-        
-            if patience_counter >= config.training.early_stopping_patience:
-                logger.info(f"Early stopping activado. No hay mejora en {config.training.early_stopping_patience} epochs.")
-                logger.info(f"Mejor Val Accuracy: {self.best_val_acc:.4f}")
-                break
-        # Save final model
-        final_path = self.checkpoint_dir / "final_model.pt"
-        torch.save(self.model.state_dict(), final_path)
-        
-        # Save history
-        history_path = self.checkpoint_dir / "training_history.json"
-        with open(history_path, 'w') as f:
-            json.dump(self.history, f, indent=2)
-        
-        logger.info(f"\n{'='*60}")
-        logger.info(f"Entrenamiento completado!")
-        logger.info(f"   Best Val Accuracy: {self.best_val_acc:.4f}")
-        logger.info(f"   Checkpoints guardados en: {self.checkpoint_dir}")
-        logger.info(f"{'='*60}\n")
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Entrenamiento de modelo temporal optimizado")
+    parser = argparse.ArgumentParser(description="Entrenamiento CORREGIDO sin data leakage")
     
     parser.add_argument("--features_dir", type=Path, default=None,
-                       help=f"Directorio con features fusionadas (default: {config.data_paths.features_fused})")
+                       help=f"Directorio con features fusionadas")
     parser.add_argument("--metadata_path", type=Path, default=None,
-                       help=f"Ruta a dataset_meta.json (default: {config.data_paths.dataset_meta})")
+                       help=f"Ruta a dataset_meta.json")
     parser.add_argument("--checkpoint_dir", type=Path, default=None,
-                       help=f"Directorio para guardar checkpoints (default: {config.model_paths.temporal_checkpoints})")
+                       help=f"Directorio para checkpoints")
     
     # Model
-    parser.add_argument("--model_type", type=str, default="lstm", choices=["lstm", "transformer"],
-                       help="Tipo de modelo temporal")
-    parser.add_argument("--num_classes", type=int, default=None,
-                       help=f"Numero de clases (default: {config.model.num_classes})")
-    parser.add_argument("--use_attention", action="store_true",  # Add attention flag
-                       help="Usar modulo de attention en LSTM (mejora accuracy)")
+    parser.add_argument("--model_type", type=str, default="lstm",
+                       choices=["lstm", "transformer"])
+    parser.add_argument("--num_classes", type=int, default=None)
+    parser.add_argument("--use_attention", action="store_true", default=True)
     
     # Training
-    parser.add_argument("--batch_size", type=int, default=None,
-                       help=f"Batch size (default: {config.training.batch_size})")
-    parser.add_argument("--num_epochs", type=int, default=None,
-                       help=f"Numero de epochs (default: {config.training.num_epochs})")
-    parser.add_argument("--learning_rate", type=float, default=None,
-                       help=f"Learning rate (default: {config.training.learning_rate})")
-    parser.add_argument("--weight_decay", type=float, default=None,
-                       help=f"Weight decay (default: {config.training.weight_decay})")
-    parser.add_argument("--num_workers", type=int, default=None,
-                       help=f"Numero de workers para DataLoader (default: {config.training.num_workers})")
+    parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument("--num_epochs", type=int, default=None)
+    parser.add_argument("--learning_rate", type=float, default=None)
+    parser.add_argument("--weight_decay", type=float, default=None)
+    parser.add_argument("--num_workers", type=int, default=None)
     
-    # Data split
-    parser.add_argument("--train_split", type=float, default=None,
-                       help=f"Proporcion de datos para entrenamiento (default: {config.data.train_split})")
-    parser.add_argument("--val_split", type=float, default=None,
-                       help=f"Proporcion de datos para validacion (default: {config.data.val_split})")
+    # Split
+    parser.add_argument("--train_split", type=float, default=0.7,
+                       help="Proporcion de VIDEOS para train")
+    parser.add_argument("--val_split", type=float, default=0.15,
+                       help="Proporcion de VIDEOS para val")
+    parser.add_argument("--random_seed", type=int, default=42)
     
-    # Device
-    parser.add_argument("--device", type=str, default=None,
-                       help=f"Device (cuda o cpu) (default: {config.training.device})")
-    parser.add_argument("--no_amp", action="store_true",
-                       help="Deshabilitar AMP")
-    
-    parser.add_argument("--no_final_eval", action="store_true",
-                       help="No ejecutar evaluación completa al finalizar entrenamiento")
+    # Flags
+    parser.add_argument("--device", type=str, default="cuda",
+                       choices=["cuda", "cpu"])
+    parser.add_argument("--analyze_only", action="store_true",
+                       help="Solo analizar distribucion, no entrenar")
     
     args = parser.parse_args()
     
+    # Defaults from config
     features_dir = args.features_dir or config.data_paths.features_fused
     metadata_path = args.metadata_path or config.data_paths.dataset_meta
-    checkpoint_dir = args.checkpoint_dir or config.model_paths.temporal_checkpoints
+    checkpoint_dir = args.checkpoint_dir or Path("models/temporal_fixed")
     batch_size = args.batch_size or config.training.batch_size
+    num_epochs = args.num_epochs or config.training.num_epochs
+    learning_rate = args.learning_rate or config.training.learning_rate
+    weight_decay = args.weight_decay or config.training.weight_decay
     num_workers = args.num_workers or config.training.num_workers
-    train_split = args.train_split or config.data.train_split
-    val_split = args.val_split or config.data.val_split
+    num_classes = args.num_classes or config.model.num_classes
     
-    if not features_dir.exists():
-        logger.error(f"Directorio de features no encontrado: {features_dir}")
+    # Analisis de distribucion
+    print("\n" + "="*60)
+    print("PASO 1: Analisis de distribucion de clases")
+    print("="*60)
+    
+    analysis = analyze_class_distribution(features_dir, metadata_path)
+    
+    if args.analyze_only:
+        print("\nAnalisis completado. Use --analyze_only=False para entrenar.")
         return
     
-    if not metadata_path.exists():
-        logger.error(f"Archivo de metadata no encontrado: {metadata_path}")
-        return
+    # Crear dataloaders con split CORREGIDO
+    print("\n" + "="*60)
+    print("PASO 2: Creando dataloaders con split a nivel de VIDEO")
+    print("="*60)
     
-    logger.info(f"Cargando dataset directamente desde: {features_dir}")
-    logger.info(f"Usando metadata: {metadata_path}")
-    
-    # Crear DataLoaders (carga automática desde carpeta)
-    train_loader, val_loader, test_loader = create_temporal_dataloaders(
+    train_loader, val_loader, test_loader, split_stats = create_temporal_dataloaders_fixed(
         features_dir=features_dir,
         metadata_path=metadata_path,
         batch_size=batch_size,
         num_workers=num_workers,
-        train_split=train_split,
-        val_split=val_split
+        train_split=args.train_split,
+        val_split=args.val_split,
+        random_seed=args.random_seed
     )
     
-    trainer = TemporalTrainer(
+    # Crear trainer
+    print("\n" + "="*60)
+    print("PASO 3: Iniciando entrenamiento")
+    print("="*60)
+    
+    trainer = TemporalTrainerFixed(
         model_type=args.model_type,
-        num_classes=args.num_classes,
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        num_epochs=args.num_epochs,
+        num_classes=num_classes,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        num_epochs=num_epochs,
         device=args.device,
-        use_amp=not args.no_amp,
+        use_amp=True,
         checkpoint_dir=checkpoint_dir,
         use_attention=args.use_attention
     )
     
     # Entrenar
-    trainer.train(train_loader, val_loader)
+    best_acc = trainer.train(train_loader, val_loader, split_stats)
     
-    if not args.no_final_eval:
-        logger.info("\n" + "="*60)
-        logger.info("Iniciando evaluación completa del modelo...")
-        logger.info("="*60 + "\n")
-        
-        # Cargar el mejor modelo
-        best_model_path = checkpoint_dir / "best_model.pt"
-        trainer.model.load_state_dict(torch.load(best_model_path))
-        
-        # Ejecutar evaluación completa
-        evaluate_model_comprehensive(
-            model=trainer.model,
-            test_loader=test_loader,  # Usar test_loader como test
-            device=trainer.device,
-            num_classes=trainer.num_classes,
-            save_dir=checkpoint_dir / "evaluation_results",
-            history_path=checkpoint_dir / "training_history.json",
-            accuracy_thresholds=[0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
-        )
+    # Evaluar en test
+    print("\n" + "="*60)
+    print("PASO 4: Evaluacion final en test set")
+    print("="*60)
+    
+    test_loss, test_acc, test_top5 = trainer.validate(test_loader)
+    
+    print(f"\nResultados en TEST SET (videos nunca vistos):")
+    print(f"   Test Loss: {test_loss:.4f}")
+    print(f"   Test Accuracy: {test_acc:.4f}")
+    print(f"   Test Top-5 Accuracy: {test_top5:.4f}")
+    
+    # Guardar resultados finales
+    results = {
+        'best_val_accuracy': float(best_acc),
+        'test_accuracy': float(test_acc),
+        'test_top5_accuracy': float(test_top5),
+        'test_loss': float(test_loss),
+        'split_stats': split_stats,
+        'training_config': {
+            'model_type': args.model_type,
+            'num_classes': num_classes,
+            'learning_rate': learning_rate,
+            'batch_size': batch_size,
+            'train_split': args.train_split,
+            'val_split': args.val_split
+        }
+    }
+    
+    results_path = checkpoint_dir / "final_results.json"
+    with open(results_path, 'w') as f:
+        json.dump(results, f, indent=2)
+    
+    print(f"\nResultados guardados en: {results_path}")
+    print("\n" + "="*60)
+    print("ENTRENAMIENTO COMPLETADO SIN DATA LEAKAGE")
+    print("="*60)
 
 
 if __name__ == "__main__":
