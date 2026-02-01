@@ -207,8 +207,6 @@ class VideoLSTMClassifier(nn.Module):
         if self.use_simple_classifier:
             # Clasificador simple: LayerNorm + Dropout + Linear
             self.classifier = nn.Sequential(
-                nn.LayerNorm(lstm_output_dim),
-                nn.Dropout(self.classifier_dropout),
                 nn.Linear(lstm_output_dim, self.num_classes)
                 
             )
