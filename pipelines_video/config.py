@@ -46,7 +46,7 @@ class ModelConfig:
     
     # Clasificador
     classifier_hidden_dim: int = 256
-    classifier_dropout: float = 0.3   # REDUCIDO: 0.5 -> 0.3
+    classifier_dropout: float = 0.4   # REDUCIDO: 0.5 -> 0.3
     use_simple_classifier: bool = True
 
 
