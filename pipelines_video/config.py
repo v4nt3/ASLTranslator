@@ -54,8 +54,8 @@ class ModelConfig:
 class TrainingConfig:
     """Configuracion de entrenamiento - BALANCEADO para reducir gap Train/Val"""
     batch_size: int = 64
-    learning_rate: float = 3e-4
-    weight_decay: float = 1e-3   # REDUCIDO: 1e-2 -> 1e-3 (menos regularizacion L2)
+    learning_rate: float =1e-4
+    weight_decay: float = 1e-5   # REDUCIDO: 1e-2 -> 1e-3 (menos regularizacion L2)
     num_epochs: int = 100
     num_workers: int = 10
     device: str = "cuda"
