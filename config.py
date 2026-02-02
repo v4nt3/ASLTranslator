@@ -143,15 +143,15 @@ class TrainingConfig:
     
     # Basico
     num_epochs: int = 150                  # Mas epochs con early stopping
-    batch_size: int = 32                   # REDUCIDO de 64 (mejor regularizacion)
-    num_workers: int = 4
+    batch_size: int = 64                   # REDUCIDO de 64 (mejor regularizacion)
+    num_workers: int = 10
     pin_memory: bool = True
     gradient_accumulation_steps: int = 2   # NUEVO: Simula batch_size=64
     
     # ==================== OPTIMIZACION ====================
     optimizer: str = "adamw"               # CAMBIADO de "adam" a "adamw"
-    learning_rate: float = 3e-4            # REDUCIDO de 3e-4
-    weight_decay: float = 1e-5            # AUMENTADO SIGNIFICATIVAMENTE de 1e-5
+    learning_rate: float = 1e-4            # REDUCIDO de 3e-4
+    weight_decay: float = 0.05            # AUMENTADO SIGNIFICATIVAMENTE de 1e-5
     momentum: float = 0.9
     adam_beta1: float = 0.9
     adam_beta2: float = 0.999
@@ -168,7 +168,7 @@ class TrainingConfig:
     
     # ==================== SCHEDULER ====================
     # Opciones: "cosine_warmup" o "plateau"
-    scheduler_type: str = "plateau"  # "cosine_warmup" | "plateau"
+    scheduler_type: str = "cosine_warmup"  # "cosine_warmup" | "plateau"
     
     # Parametros para Cosine Annealing con Warmup
     warmup_epochs: int = 5
@@ -208,7 +208,7 @@ class TrainingConfig:
     run_final_evaluation: bool = True
     
     # Arquitectura LSTM - MAS REGULARIZADA
-    model_hidden_dim: int = 384            # REDUCIDO de 512
+    model_hidden_dim: int = 512            # REDUCIDO de 512
     model_num_layers: int = 2
     model_dropout: float = 0.4             # AUMENTADO de 0.2
     model_bidirectional: bool = True
