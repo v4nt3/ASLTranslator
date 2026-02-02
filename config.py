@@ -149,7 +149,7 @@ class TrainingConfig:
     gradient_accumulation_steps: int = 2   # NUEVO: Simula batch_size=64
     
     # ==================== OPTIMIZACION ====================
-    optimizer: str = "adamw"               # CAMBIADO de "adam" a "adamw"
+    optimizer: str = "adam"               # CAMBIADO de "adam" a "adamw"
     learning_rate: float = 1e-4            # REDUCIDO de 3e-4
     weight_decay: float = 0.05             # AUMENTADO SIGNIFICATIVAMENTE de 1e-5
     momentum: float = 0.9
