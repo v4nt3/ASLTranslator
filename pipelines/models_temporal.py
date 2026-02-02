@@ -91,7 +91,15 @@ class TemporalLSTMClassifier(nn.Module):
             self.attention = AttentionModule(lstm_output_dim)
         
 
-        self.classifier = nn.Linear(lstm_output_dim, num_classes)
+        # self.classifier = nn.Linear( 
+        #     lstm_output_dim, num_classes)
+        
+        self.classifier = nn.Sequential(
+                nn.LayerNorm(lstm_output_dim),
+                nn.Dropout(self.classifier_dropout),
+                nn.Linear(lstm_output_dim, self.num_classes)
+                
+            )
         
         logger.info(f"✓ TemporalLSTMClassifier inicializado")
         logger.info(f"   Input dim: {input_dim}")
