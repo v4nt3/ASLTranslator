@@ -15,7 +15,7 @@ import json
 import time
 from dataclasses import dataclass
 
-from pipelines.config import config
+from config import config
 from pipelines.models_temporal import TemporalLSTMClassifier
 
 logging.basicConfig(level=logging.INFO)

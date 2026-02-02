@@ -20,7 +20,7 @@ from typing import Dict, List, Tuple, Optional
 from collections import Counter, defaultdict
 import matplotlib.pyplot as plt
 
-from pipelines.config import config
+from config import config
 
 logging.basicConfig(
     level=logging.INFO,

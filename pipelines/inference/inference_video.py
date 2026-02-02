@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass
 import json
 
-from pipelines.config import config
+from config import config
 from pipelines.models_temporal import TemporalLSTMClassifier
 from pipelines_video.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
 

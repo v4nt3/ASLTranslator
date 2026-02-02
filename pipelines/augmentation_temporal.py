@@ -7,7 +7,7 @@ import numpy as np #type: ignore
 import torch #type: ignore
 from typing import Tuple
 import logging
-from pipelines.config import config
+from config import config
 
 logger = logging.getLogger(__name__)
 

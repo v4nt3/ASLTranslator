@@ -39,7 +39,7 @@ from pipelines.dataset_temporal import (
     create_temporal_dataloaders_fixed,
     analyze_class_distribution
 )
-from pipelines.config import config
+from config import config
 
 
 def setup_logging(checkpoint_dir: Path) -> logging.Logger:

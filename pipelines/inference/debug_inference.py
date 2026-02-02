@@ -69,7 +69,7 @@ def verify_model(model_path: Path, expected_input_dim: int, num_classes: int, de
     logger.info("="*60)
     
     from pipelines.models_temporal import TemporalLSTMClassifier
-    from pipelines.config import config
+    from config import config
     
     # Cargar modelo
     model = TemporalLSTMClassifier(
@@ -154,7 +154,7 @@ def verify_config(expected_fused_dim: int):
     logger.info("VERIFICACIÓN DE CONFIG.PY")
     logger.info("="*60)
     
-    from pipelines.config import config
+    from config import config
     
     logger.info(f"\nDimensiones en config:")
     logger.info(f"   visual_feature_dim: {config.data.visual_feature_dim}")

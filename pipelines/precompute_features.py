@@ -11,7 +11,7 @@ import logging
 from torchvision import transforms #type: ignore
 from pipelines_video.save_extractors import ResNet101FeatureExtractor, PoseFeatureExtractor
 
-from pipelines.config import config
+from config import config
 
 logging.basicConfig(
     level=logging.INFO,

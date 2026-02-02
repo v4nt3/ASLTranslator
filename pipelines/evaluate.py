@@ -623,7 +623,7 @@ def evaluate_model_comprehensive(
 def main():
     """Ejecuta evaluación de forma independiente"""
     import argparse
-    from pipelines.config import config
+    from config import config
     from pipelines.models_temporal import get_temporal_model
     from pipelines.dataset_temporal import create_temporal_dataloaders
     
