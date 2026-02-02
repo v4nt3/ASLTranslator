@@ -167,16 +167,20 @@ class TrainingConfig:
     label_smoothing: float = 0.15          # AUMENTADO de 0.1
     
     # ==================== SCHEDULER ====================
-    # Cosine Annealing con Warm Restarts (mejor que plateau para este caso)
-    scheduler_type: str = "cosine_warmup"  # CAMBIADO
-    warmup_epochs: int = 5                 # NUEVO: Warmup
-    warmup_lr_init: float = 1e-6           # NUEVO
+    # Opciones: "cosine_warmup" o "plateau"
+    scheduler_type: str = "plateau"  # "cosine_warmup" | "plateau"
+    
+    # Parametros para Cosine Annealing con Warmup
+    warmup_epochs: int = 5
+    warmup_lr_init: float = 1e-6
     min_lr: float = 1e-6
     
-    # Alternativa: ReduceLROnPlateau
-    scheduler_patience: int = 8
-    scheduler_factor: float = 0.5
-    scheduler_min_lr: float = 1e-6
+    # Parametros para ReduceLROnPlateau
+    scheduler_patience: int = 8            # Epochs sin mejora antes de reducir LR
+    scheduler_factor: float = 0.5          # Factor de reduccion (new_lr = lr * factor)
+    scheduler_min_lr: float = 1e-6         # LR minimo
+    scheduler_threshold: float = 1e-4      # Threshold para considerar mejora
+    scheduler_cooldown: int = 2            # Epochs de cooldown despues de reducir
     
     # AMP
     use_amp: bool = True
@@ -185,7 +189,7 @@ class TrainingConfig:
     # ==================== CHECKPOINTING ====================
     save_interval: int = 10
     save_best_only: bool = True
-    save_last_k: int = 15                  # NUEVO: Guardar ultimos K checkpoints
+    save_last_k: int = 3                   # NUEVO: Guardar ultimos K checkpoints
     
     # ==================== EARLY STOPPING ====================
     use_early_stopping: bool = True
@@ -303,6 +307,16 @@ class Config:
         print(f"  - Optimizer: {t.optimizer}")
         print(f"  - Weight Decay: {t.weight_decay}")
         print(f"  - Gradient Clipping: {t.max_grad_norm}")
+        
+        print(f"\n[Scheduler]")
+        print(f"  - Tipo: {t.scheduler_type}")
+        if t.scheduler_type == "cosine_warmup":
+            print(f"  - Warmup epochs: {t.warmup_epochs}")
+            print(f"  - Min LR: {t.min_lr}")
+        else:
+            print(f"  - Patience: {t.scheduler_patience}")
+            print(f"  - Factor: {t.scheduler_factor}")
+            print(f"  - Min LR: {t.scheduler_min_lr}")
         
         print(f"\n[Dropout]")
         print(f"  - Model Dropout: {t.model_dropout}")

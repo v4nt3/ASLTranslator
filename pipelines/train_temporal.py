@@ -89,7 +89,12 @@ class CosineAnnealingWarmup:
         self.base_lr = optimizer.param_groups[0]['lr']
         self.last_epoch = last_epoch
         
-    def step(self, epoch: int = None):
+    def step(self, epoch: int = None, metric: float = None):
+        """
+        Args:
+            epoch: Numero de epoch actual
+            metric: No usado, solo para compatibilidad con ReduceLROnPlateau
+        """
         if epoch is None:
             epoch = self.last_epoch + 1
         self.last_epoch = epoch
@@ -106,6 +111,53 @@ class CosineAnnealingWarmup:
             param_group['lr'] = lr
         
         return lr
+    
+    def get_lr(self) -> float:
+        return self.optimizer.param_groups[0]['lr']
+
+
+class PlateauSchedulerWrapper:
+    """
+    Wrapper para ReduceLROnPlateau con interfaz consistente.
+    """
+    
+    def __init__(
+        self,
+        optimizer: optim.Optimizer,
+        mode: str = 'min',
+        factor: float = 0.5,
+        patience: int = 8,
+        threshold: float = 1e-4,
+        min_lr: float = 1e-6,
+        cooldown: int = 2,
+        verbose: bool = True
+    ):
+        self.optimizer = optimizer
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode=mode,
+            factor=factor,
+            patience=patience,
+            threshold=threshold,
+            min_lr=min_lr,
+            cooldown=cooldown,
+            verbose=verbose
+        )
+        self.last_epoch = -1
+    
+    def step(self, epoch: int = None, metric: float = None):
+        """
+        Args:
+            epoch: Numero de epoch (para logging)
+            metric: Metrica a monitorear (val_loss o val_accuracy)
+        """
+        if epoch is not None:
+            self.last_epoch = epoch
+        
+        if metric is not None:
+            self.scheduler.step(metric)
+        
+        return self.get_lr()
     
     def get_lr(self) -> float:
         return self.optimizer.param_groups[0]['lr']
@@ -164,6 +216,10 @@ class RegularizedTrainer:
         rdrop_alpha: float = None,
         warmup_epochs: int = None,
         max_grad_norm: float = None,
+        # Scheduler
+        scheduler_type: str = None,  # "cosine_warmup" o "plateau"
+        scheduler_patience: int = None,
+        scheduler_factor: float = None,
         # Modelo
         hidden_dim: int = None,
         dropout: float = None,
@@ -203,6 +259,12 @@ class RegularizedTrainer:
             warmup_epochs = config.training.warmup_epochs
         if max_grad_norm is None:
             max_grad_norm = config.training.max_grad_norm
+        if scheduler_type is None:
+            scheduler_type = config.training.scheduler_type
+        if scheduler_patience is None:
+            scheduler_patience = config.training.scheduler_patience
+        if scheduler_factor is None:
+            scheduler_factor = config.training.scheduler_factor
         if hidden_dim is None:
             hidden_dim = config.training.model_hidden_dim
         if dropout is None:
@@ -219,6 +281,7 @@ class RegularizedTrainer:
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.max_grad_norm = max_grad_norm
+        self.scheduler_type = scheduler_type
         
         # Flags de regularizacion
         self.use_ema = use_ema
@@ -262,23 +325,28 @@ class RegularizedTrainer:
             eps=config.training.adam_eps
         )
         
-        # Scheduler: Cosine con warmup
-        # self.scheduler = CosineAnnealingWarmup(
-        #     optimizer=self.optimizer,
-        #     warmup_epochs=warmup_epochs,
-        #     total_epochs=num_epochs,
-        #     warmup_lr_init=config.training.warmup_lr_init,
-        #     min_lr=config.training.min_lr
-        # )
-
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer = self.optimizer,
-                mode = 'max',  # CORREGIDO: 'max' para accuracy
-                factor=config.training.scheduler_factor,
-                patience=config.training.scheduler_patience,
+        # Scheduler: Cosine con warmup O ReduceLROnPlateau
+        if scheduler_type == "plateau":
+            self.scheduler = PlateauSchedulerWrapper(
+                optimizer=self.optimizer,
+                mode='min',  # Monitorea val_loss (menor es mejor)
+                factor=scheduler_factor,
+                patience=scheduler_patience,
+                threshold=config.training.scheduler_threshold,
                 min_lr=config.training.scheduler_min_lr,
+                cooldown=config.training.scheduler_cooldown,
                 verbose=True
-        )
+            )
+            self.logger.info(f"Usando ReduceLROnPlateau (patience={scheduler_patience}, factor={scheduler_factor})")
+        else:
+            self.scheduler = CosineAnnealingWarmup(
+                optimizer=self.optimizer,
+                warmup_epochs=warmup_epochs,
+                total_epochs=num_epochs,
+                warmup_lr_init=config.training.warmup_lr_init,
+                min_lr=config.training.min_lr
+            )
+            self.logger.info(f"Usando CosineAnnealingWarmup (warmup={warmup_epochs} epochs)")
         
         # Loss con label smoothing
         if label_smoothing > 0:
@@ -341,7 +409,12 @@ class RegularizedTrainer:
         self.logger.info(f"   Use attention: {use_attention}")
         self.logger.info(f"   Use AMP: {use_amp}")
         self.logger.info(f"   Max grad norm: {max_grad_norm}")
-        self.logger.info(f"   Warmup epochs: {warmup_epochs}")
+        self.logger.info(f"   Scheduler: {scheduler_type}")
+        if scheduler_type == "cosine_warmup":
+            self.logger.info(f"   Warmup epochs: {warmup_epochs}")
+        else:
+            self.logger.info(f"   Scheduler patience: {scheduler_patience}")
+            self.logger.info(f"   Scheduler factor: {scheduler_factor}")
     
     def train(
         self, 
@@ -362,8 +435,11 @@ class RegularizedTrainer:
         patience_counter = 0
         
         for epoch in range(self.num_epochs):
-            # Actualizar LR
-            current_lr = self.scheduler.step(epoch)
+            # Actualizar LR (para cosine, se actualiza al inicio del epoch)
+            if self.scheduler_type == "cosine_warmup":
+                current_lr = self.scheduler.step(epoch)
+            else:
+                current_lr = self.scheduler.get_lr()
             
             self.logger.info(f"\nEpoch {epoch + 1}/{self.num_epochs} | LR: {current_lr:.6f}")
             
@@ -387,6 +463,14 @@ class RegularizedTrainer:
             self.history['val_top5_accuracy'].append(val_top5)
             self.history['val_ema_accuracy'].append(val_ema_acc)
             self.history['learning_rate'].append(current_lr)
+            
+            # Actualizar scheduler plateau (usa val_loss como metrica)
+            if self.scheduler_type == "plateau":
+                old_lr = self.scheduler.get_lr()
+                self.scheduler.step(epoch=epoch, metric=val_loss)
+                new_lr = self.scheduler.get_lr()
+                if new_lr < old_lr:
+                    self.logger.info(f"   [Scheduler] LR reducido: {old_lr:.6f} -> {new_lr:.6f}")
             
             # Log
             self.logger.info(f"   Train Loss: {train_loss:.4f} | Acc: {train_acc:.4f} | Top-5: {train_top5:.4f}")
@@ -473,7 +557,7 @@ class RegularizedTrainer:
                 self.optimizer.zero_grad()
                 
                 # Mixup (si esta activo)
-                use_mixup_this_batch = self.mixup is not None and self.model.training
+                use_mixup_this_batch = self.mixup is not None and self.training
                 if use_mixup_this_batch:
                     features, targets_a, targets_b, lam = self.mixup(features, targets, lengths)
                 
@@ -712,6 +796,15 @@ def main():
     parser.add_argument("--use_rdrop", action="store_true", default=False)
     parser.add_argument("--label_smoothing", type=float, default=None)
     
+    # Scheduler
+    parser.add_argument("--scheduler", type=str, default="cosine_warmup",
+                       choices=["cosine_warmup", "plateau"],
+                       help="Tipo de scheduler: 'cosine_warmup' o 'plateau'")
+    parser.add_argument("--scheduler_patience", type=int, default=None,
+                       help="Patience para ReduceLROnPlateau (default: 8)")
+    parser.add_argument("--scheduler_factor", type=float, default=None,
+                       help="Factor de reduccion para ReduceLROnPlateau (default: 0.5)")
+    
     # Split
     parser.add_argument("--train_split", type=float, default=0.7)
     parser.add_argument("--val_split", type=float, default=0.15)
@@ -784,7 +877,10 @@ def main():
         use_rdrop=args.use_rdrop,
         label_smoothing=label_smoothing,
         hidden_dim=hidden_dim,
-        dropout=dropout
+        dropout=dropout,
+        scheduler_type=args.scheduler,
+        scheduler_patience=args.scheduler_patience,
+        scheduler_factor=args.scheduler_factor
     )
     
     # Train
