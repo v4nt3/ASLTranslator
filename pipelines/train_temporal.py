@@ -317,7 +317,7 @@ class RegularizedTrainer:
         self.logger.info(f"Parametros entrenables: {trainable_params:,}")
         
         # Optimizer: AdamW con weight decay fuerte
-        self.optimizer = optim.AdamW(
+        self.optimizer = optim.Adam(
             self.model.parameters(),
             lr=learning_rate,
             weight_decay=weight_decay,
