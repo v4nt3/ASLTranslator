@@ -464,7 +464,7 @@ class RegularizedTrainer:
                 self.optimizer.zero_grad()
                 
                 # Mixup (si esta activo)
-                use_mixup_this_batch = self.mixup is not None and self.training
+                use_mixup_this_batch = self.mixup is not None and self.model.training
                 if use_mixup_this_batch:
                     features, targets_a, targets_b, lam = self.mixup(features, targets, lengths)
                 
