@@ -263,12 +263,21 @@ class RegularizedTrainer:
         )
         
         # Scheduler: Cosine con warmup
-        self.scheduler = CosineAnnealingWarmup(
-            optimizer=self.optimizer,
-            warmup_epochs=warmup_epochs,
-            total_epochs=num_epochs,
-            warmup_lr_init=config.training.warmup_lr_init,
-            min_lr=config.training.min_lr
+        # self.scheduler = CosineAnnealingWarmup(
+        #     optimizer=self.optimizer,
+        #     warmup_epochs=warmup_epochs,
+        #     total_epochs=num_epochs,
+        #     warmup_lr_init=config.training.warmup_lr_init,
+        #     min_lr=config.training.min_lr
+        # )
+
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer = self.optimizer,
+                mode = 'max',  # CORREGIDO: 'max' para accuracy
+                factor=config.training.scheduler_factor,
+                patience=config.training.scheduler_patience,
+                min_lr=config.training.scheduler_min_lr,
+                verbose=True
         )
         
         # Loss con label smoothing
