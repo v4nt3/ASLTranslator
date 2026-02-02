@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import logging
 from tqdm import tqdm # type: ignore
-from config import config
+from pipelines.config import config
 import json
 import os
 import math

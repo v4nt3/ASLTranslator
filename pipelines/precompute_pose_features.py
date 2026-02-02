@@ -9,7 +9,7 @@ from pathlib import Path
 from tqdm import tqdm #type: ignore
 import logging
 
-from config import config
+from pipelines.config import config
 
 logging.basicConfig(
     level=logging.INFO,

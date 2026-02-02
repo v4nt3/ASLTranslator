@@ -5,7 +5,7 @@ Ejecuta todo el pipeline: preprocessing → entrenamiento → evaluación
 
 import argparse
 import logging
-from config import config
+from pipelines.config import config
 from pathlib import Path
 
 # Configurar logging
