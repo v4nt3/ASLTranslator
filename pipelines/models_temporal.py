@@ -190,14 +190,15 @@ class TemporalLSTMRegularized(nn.Module):
             self.attention = AttentionModuleRegularized(lstm_output_dim, dropout=dropout)
         
         # 7. Clasificador con regularizacion
-        self.classifier = nn.Sequential(
-            nn.Linear(lstm_output_dim, lstm_output_dim // 2),
-            nn.LayerNorm(lstm_output_dim // 2) if use_layer_norm else nn.Identity(),
-            nn.GELU(),
-            nn.Dropout(classifier_dropout),
-            nn.Linear(lstm_output_dim // 2, num_classes)
-        )
-        
+        # self.classifier = nn.Sequential(
+        #     nn.Linear(lstm_output_dim, lstm_output_dim // 2),
+        #     nn.LayerNorm(lstm_output_dim // 2) if use_layer_norm else nn.Identity(),
+        #     nn.GELU(),
+        #     nn.Dropout(classifier_dropout),
+        #     nn.Linear(lstm_output_dim // 2, num_classes)
+        # )
+        self.classifier = nn.Linear(lstm_output_dim, num_classes)
+
         # Inicializacion de pesos
         self._init_weights()
         
