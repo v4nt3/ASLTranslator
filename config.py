@@ -176,7 +176,7 @@ class TrainingConfig:
     min_lr: float = 1e-6
     
     # Parametros para ReduceLROnPlateau
-    scheduler_patience: int = 8            # Epochs sin mejora antes de reducir LR
+    scheduler_patience: int = 10            # Epochs sin mejora antes de reducir LR
     scheduler_factor: float = 0.5          # Factor de reduccion (new_lr = lr * factor)
     scheduler_min_lr: float = 1e-6         # LR minimo
     scheduler_threshold: float = 1e-4      # Threshold para considerar mejora
@@ -208,7 +208,7 @@ class TrainingConfig:
     run_final_evaluation: bool = True
     
     # Arquitectura LSTM - MAS REGULARIZADA
-    model_hidden_dim: int = 512            # REDUCIDO de 512
+    model_hidden_dim: int = 384            # REDUCIDO de 512
     model_num_layers: int = 2
     model_dropout: float = 0.4             # AUMENTADO de 0.2
     model_bidirectional: bool = True
